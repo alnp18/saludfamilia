@@ -1,0 +1,137 @@
+import { state } from '../state.js';
+import * as api from '../lib/api.js';
+import { showModal, closeModal, showToast } from '../lib/modal.js';
+import { esc } from '../lib/utils.js';
+
+const SP_COLORS_MAP = {
+  'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
+  'Pediatría': '#047857', 'Ortopedia': '#1d4ed8', 'Ginecología': '#be185d',
+  'Medicina Interna': '#0369a1', 'Radiología': '#c2410c', 'Laboratorio': '#047857',
+};
+
+export async function render() {
+  const container = document.getElementById('view-doctors');
+  if (!container) return;
+
+  container.innerHTML = `
+    <div class="view-header">
+      <div><div class="view-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> Médicos</div><div class="view-sub">Directorio de especialistas</div></div>
+      <button class="btn btn-primary" id="btn-new-doctor"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Agregar médico</button>
+    </div>
+    <div id="doctors-content"></div>
+  `;
+  document.getElementById('btn-new-doctor').addEventListener('click', () => openDoctorModal());
+
+  const docs = await api.listDoctors(state.household.id);
+  const centers = await api.listCenters(state.household.id);
+  const centerMap = Object.fromEntries(centers.map(c => [c.id, c.nombre]));
+  const el = document.getElementById('doctors-content');
+
+  if (!docs.length) {
+    el.innerHTML = `<div class="empty-state"><svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      <h3>Sin médicos registrados</h3><p>Registra los especialistas que atienden a tus pacientes.</p>
+      <button class="btn btn-primary" id="btn-new-doctor-empty" style="margin-top:8px">Agregar primer médico</button></div>`;
+    document.getElementById('btn-new-doctor-empty').addEventListener('click', () => openDoctorModal());
+    return;
+  }
+
+  const bySpec = {};
+  docs.forEach(d => {
+    const sp = d.especialidad || 'Sin especialidad';
+    (bySpec[sp] ||= []).push(d);
+  });
+
+  el.innerHTML = Object.entries(bySpec).sort(([a], [b]) => a.localeCompare(b)).map(([sp, list]) => {
+    const col = SP_COLORS_MAP[sp] || '#374060';
+    return `<div style="margin-bottom:22px">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--ts);margin-bottom:10px;display:flex;align-items:center;gap:8px">
+        <span style="width:8px;height:8px;border-radius:50%;background:${col};display:inline-block;flex-shrink:0"></span>${esc(sp)}
+        <span style="color:var(--tm)">${list.length}</span>
+        <span style="flex:1;height:1px;background:var(--border)"></span>
+      </div>
+      <div class="doc-grid">
+        ${list.map(d => `<div class="doc-card">
+          <div class="doc-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0112 0v2"/></svg></div>
+          <div style="flex:1;min-width:0">
+            <div class="doc-name">${esc(d.nombre)}</div>
+            <div class="doc-detail">${d.consultorio ? esc(d.consultorio) + ' · ' : ''}${d.centroId ? esc(centerMap[d.centroId] || '') : ''}</div>
+          </div>
+          <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${d.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
+          <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${d.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
+  el.querySelectorAll('[data-edit-id]').forEach(b => b.addEventListener('click', () => openDoctorModal(b.dataset.editId)));
+  el.querySelectorAll('[data-delete-id]').forEach(b => b.addEventListener('click', () => deleteDoctorConfirm(b.dataset.deleteId)));
+}
+
+async function openDoctorModal(id) {
+  const centers = await api.listCenters(state.household.id);
+  showModal(
+    id ? 'Editar médico' : 'Nuevo médico',
+    `<div class="form-body">
+      <div class="form-row cols-2">
+        <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido"/></div>
+        <div class="form-field"><label class="fl">Especialidad</label>
+          <select class="fi" id="df-esp">
+            <option value="">Seleccionar…</option>
+            ${Object.keys(SP_COLORS_MAP).map(s => `<option>${s}</option>`).join('')}
+            <option value="Otra">Otra</option>
+          </select>
+        </div>
+        <div class="form-field"><label class="fl">Centro médico</label>
+          <select class="fi" id="df-centro">
+            <option value="">Sin centro asignado</option>
+            ${centers.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301"/></div>
+        <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="df-tel" type="tel" placeholder="Número directo o extensión"/></div>
+        <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="df-notas" rows="2" placeholder="Horarios, indicaciones especiales…"></textarea></div>
+      </div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: id ? 'Guardar cambios' : 'Agregar médico', cls: 'btn btn-primary', action: () => saveDoctorForm(id) },
+    ]
+  );
+  if (id) api.getDoctor(id).then(d => {
+    document.getElementById('df-nombre').value = d.nombre || '';
+    document.getElementById('df-esp').value = d.especialidad || '';
+    document.getElementById('df-centro').value = d.centroId || '';
+    document.getElementById('df-consul').value = d.consultorio || '';
+    document.getElementById('df-tel').value = d.tel || '';
+    document.getElementById('df-notas').value = d.notas || '';
+  });
+}
+
+async function saveDoctorForm(editId) {
+  const nombre = document.getElementById('df-nombre').value.trim();
+  if (!nombre) { showToast('El nombre es obligatorio', 'err'); return; }
+  const obj = {
+    id: editId || undefined,
+    nombre,
+    especialidad: document.getElementById('df-esp').value,
+    centroId: document.getElementById('df-centro').value,
+    consultorio: document.getElementById('df-consul').value.trim(),
+    tel: document.getElementById('df-tel').value.trim(),
+    notas: document.getElementById('df-notas').value.trim(),
+  };
+  try {
+    await api.saveDoctor(obj, state.household.id);
+    closeModal();
+    showToast(editId ? 'Médico actualizado' : 'Médico registrado');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al guardar', 'err');
+  }
+}
+
+async function deleteDoctorConfirm(id) {
+  if (!confirm('¿Eliminar este médico del directorio?')) return;
+  await api.deleteDoctor(id);
+  showToast('Médico eliminado', 'warn');
+  render();
+}
