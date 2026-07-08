@@ -1,5 +1,5 @@
-import { ThemeEngine } from './theme.js';
-import { initials, avatarColor } from './utils.js';
+import { ThemeEngine } from './lib/theme.js';
+import { initials, avatarColor } from './lib/utils.js';
 
 export const state = {
   user: null,        // sesión de Supabase Auth
