@@ -103,17 +103,17 @@ function setAuthMode(mode) {
 }
 
 function wireAuthScreen() {
-  document.getElementById('auth-switch-btn').addEventListener('click', () => {
-    setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
-  });
-
   document.getElementById('auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const submitBtn = document.getElementById('auth-submit');
+    if (submitBtn.disabled) return;
+
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
     const errEl = document.getElementById('auth-error');
     errEl.classList.remove('show');
 
+    submitBtn.disabled = true;
     try {
       if (authMode === 'signin') {
         await auth.signIn(email, password);
@@ -124,6 +124,8 @@ function wireAuthScreen() {
     } catch (err) {
       errEl.textContent = err.message || 'Ocurrió un error. Intenta de nuevo.';
       errEl.classList.add('show');
+    } finally {
+      submitBtn.disabled = false;
     }
   });
 }
