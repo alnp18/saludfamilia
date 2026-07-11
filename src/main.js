@@ -103,16 +103,18 @@ function setAuthMode(mode) {
 }
 
 function wireAuthScreen() {
+  document.getElementById('auth-switch-btn').addEventListener('click', () => {
+    setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+  });
+
   document.getElementById('auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const submitBtn = document.getElementById('auth-submit');
     if (submitBtn.disabled) return;
-
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
     const errEl = document.getElementById('auth-error');
     errEl.classList.remove('show');
-
     submitBtn.disabled = true;
     try {
       if (authMode === 'signin') {
@@ -136,7 +138,6 @@ function wireAuthScreen() {
     }
   });
 }
-
 async function init() {
   wireAuthScreen();
 
