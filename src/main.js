@@ -117,12 +117,19 @@ function wireAuthScreen() {
     try {
       if (authMode === 'signin') {
         await auth.signIn(email, password);
+        // onAuthStateChange dispara bootstrapApp()
       } else {
         await auth.signUp(email, password);
+        errEl.textContent = 'Cuenta creada. Revisá tu correo (bandeja de entrada o spam) para confirmarla antes de iniciar sesión. Si no te llega en unos minutos, es posible que ya tengas una cuenta — probá "Iniciar sesión".';
+        errEl.classList.add('show');
+        document.getElementById('auth-form').reset();
       }
-      // onAuthStateChange dispara bootstrapApp()
     } catch (err) {
-      errEl.textContent = err.message || 'Ocurrió un error. Intenta de nuevo.';
+      if (authMode === 'signin' && err.message === 'Invalid login credentials') {
+        errEl.textContent = 'Correo o contraseña incorrectos. Si acabás de crear tu cuenta, confirmá tu correo antes de iniciar sesión.';
+      } else {
+        errEl.textContent = err.message || 'Ocurrió un error. Intenta de nuevo.';
+      }
       errEl.classList.add('show');
     } finally {
       submitBtn.disabled = false;
