@@ -22,6 +22,28 @@ export async function signOut() {
   if (error) throw error;
 }
 
+/**
+ * Envía un correo con un enlace para restablecer la contraseña.
+ * `redirectTo` debe estar permitido en Supabase (Auth → URL Configuration):
+ * o bien coincide con el Site URL, o está en la lista de Redirect URLs.
+ * No revela si el correo existe (mismo criterio anti-enumeración que el
+ * resto del flujo de auth).
+ */
+export async function requestPasswordReset(email, redirectTo) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
+  if (error) throw error;
+}
+
+/**
+ * Actualiza la contraseña del usuario con la sesión activa. En el flujo de
+ * recuperación, esa sesión es la temporal que crea el enlace del correo
+ * (evento PASSWORD_RECOVERY).
+ */
+export async function updatePassword(newPassword) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 export async function getSession() {
   const { data, error } = await supabase.auth.getSession();
   if (error) throw error;
@@ -29,8 +51,8 @@ export async function getSession() {
 }
 
 export function onAuthStateChange(callback) {
-  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-    callback(session);
+  const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+    callback(event, session);
   });
   return () => sub.subscription.unsubscribe();
 }

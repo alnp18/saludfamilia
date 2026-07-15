@@ -88,23 +88,106 @@ async function bootstrapApp() {
 // ─────────────────────────────────────────
 // AUTH SCREEN
 // ─────────────────────────────────────────
-let authMode = 'signin'; // 'signin' | 'signup'
+let authMode = 'signin'; // 'signin' | 'signup' | 'recover' | 'reset'
+let recoveryMode = false; // true mientras el usuario restablece su contraseña vía enlace
+
+// El flag lo setea un <script> inline en el <head> (index.html), antes de que
+// supabase-js procese y limpie el hash. Se combina con una lectura directa por
+// si el flag no estuviera disponible.
+const RECOVERY_IN_URL = window.__recoveryInUrl === true
+  || (window.location.hash || '').includes('type=recovery');
+
+const AUTH_MODES = {
+  signin: {
+    title: 'Iniciar sesión',
+    sub: 'Entra con tu correo y contraseña.',
+    submit: 'Entrar',
+    email: true, password: true, confirm: false, forgot: true, showSwitch: true,
+    passwordLabel: 'Contraseña', passwordAutocomplete: 'current-password',
+    switchText: '¿No tienes cuenta?', switchBtn: 'Crear una',
+  },
+  signup: {
+    title: 'Crear cuenta',
+    sub: 'Crea tu cuenta para empezar a gestionar la salud de tu familia.',
+    submit: 'Crear cuenta',
+    email: true, password: true, confirm: false, forgot: false, showSwitch: true,
+    passwordLabel: 'Contraseña', passwordAutocomplete: 'new-password',
+    switchText: '¿Ya tienes cuenta?', switchBtn: 'Iniciar sesión',
+  },
+  recover: {
+    title: 'Recuperar contraseña',
+    sub: 'Ingresá tu correo y te enviaremos un enlace para restablecerla.',
+    submit: 'Enviar enlace',
+    email: true, password: false, confirm: false, forgot: false, showSwitch: true,
+    switchText: '¿La recordaste?', switchBtn: 'Iniciar sesión',
+  },
+  reset: {
+    title: 'Nueva contraseña',
+    sub: 'Elegí una contraseña nueva para tu cuenta.',
+    submit: 'Guardar contraseña',
+    email: false, password: true, confirm: true, forgot: false, showSwitch: true,
+    passwordLabel: 'Nueva contraseña', passwordAutocomplete: 'new-password',
+    switchText: '¿Cambiaste de idea?', switchBtn: 'Volver a iniciar sesión',
+  },
+};
+
+function toggleField(fieldId, inputId, visible) {
+  document.getElementById(fieldId).classList.toggle('hidden', !visible);
+  const input = document.getElementById(inputId);
+  // El atributo required en un campo oculto rompe la validación del navegador,
+  // así que se activa solo cuando el campo está visible.
+  if (visible) input.setAttribute('required', '');
+  else input.removeAttribute('required');
+}
+
+function showAuthScreen() {
+  document.getElementById('auth-screen').style.display = 'flex';
+  document.getElementById('app-header').style.display = 'none';
+  document.getElementById('app-shell').style.display = 'none';
+}
 
 function setAuthMode(mode) {
   authMode = mode;
-  document.getElementById('auth-title').textContent = mode === 'signin' ? 'Iniciar sesión' : 'Crear cuenta';
-  document.getElementById('auth-sub').textContent = mode === 'signin'
-    ? 'Entra con tu correo y contraseña.'
-    : 'Crea tu cuenta para empezar a gestionar la salud de tu familia.';
-  document.getElementById('auth-submit').textContent = mode === 'signin' ? 'Entrar' : 'Crear cuenta';
-  document.getElementById('auth-switch-text').textContent = mode === 'signin' ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?';
-  document.getElementById('auth-switch-btn').textContent = mode === 'signin' ? 'Crear una' : 'Iniciar sesión';
+  const cfg = AUTH_MODES[mode];
+
+  document.getElementById('auth-title').textContent = cfg.title;
+  document.getElementById('auth-sub').textContent = cfg.sub;
+  document.getElementById('auth-submit').textContent = cfg.submit;
+
+  toggleField('auth-email-field', 'auth-email', cfg.email);
+  toggleField('auth-password-field', 'auth-password', cfg.password);
+  toggleField('auth-confirm-field', 'auth-confirm', cfg.confirm);
+
+  if (cfg.password) {
+    document.getElementById('auth-password-label').textContent = cfg.passwordLabel;
+    document.getElementById('auth-password').setAttribute('autocomplete', cfg.passwordAutocomplete);
+  }
+
+  document.getElementById('auth-forgot-row').classList.toggle('hidden', !cfg.forgot);
+
+  const switchRow = document.querySelector('.auth-switch');
+  switchRow.classList.toggle('hidden', !cfg.showSwitch);
+  if (cfg.showSwitch) {
+    document.getElementById('auth-switch-text').textContent = cfg.switchText;
+    document.getElementById('auth-switch-btn').textContent = cfg.switchBtn;
+  }
+
+  // Limpiar campos sensibles y el mensaje al cambiar de modo.
+  document.getElementById('auth-password').value = '';
+  document.getElementById('auth-confirm').value = '';
   document.getElementById('auth-error').classList.remove('show');
 }
 
 function wireAuthScreen() {
+  setAuthMode('signin');
+
   document.getElementById('auth-switch-btn').addEventListener('click', () => {
+    if (authMode === 'reset') recoveryMode = false;
     setAuthMode(authMode === 'signin' ? 'signup' : 'signin');
+  });
+
+  document.getElementById('auth-forgot-btn').addEventListener('click', () => {
+    setAuthMode('recover');
   });
 
   document.getElementById('auth-form').addEventListener('submit', async (e) => {
@@ -113,18 +196,48 @@ function wireAuthScreen() {
     if (submitBtn.disabled) return;
     const email = document.getElementById('auth-email').value.trim();
     const password = document.getElementById('auth-password').value;
+    const confirmPw = document.getElementById('auth-confirm').value;
     const errEl = document.getElementById('auth-error');
     errEl.classList.remove('show');
+
+    if (authMode === 'reset') {
+      if (password.length < 6) {
+        errEl.textContent = 'La contraseña debe tener al menos 6 caracteres.';
+        errEl.classList.add('show');
+        return;
+      }
+      if (password !== confirmPw) {
+        errEl.textContent = 'Las contraseñas no coinciden.';
+        errEl.classList.add('show');
+        return;
+      }
+    }
+
     submitBtn.disabled = true;
     try {
       if (authMode === 'signin') {
         await auth.signIn(email, password);
         // onAuthStateChange dispara bootstrapApp()
-      } else {
+      } else if (authMode === 'signup') {
         await auth.signUp(email, password);
         errEl.textContent = 'Cuenta creada. Revisá tu correo (bandeja de entrada o spam) para confirmarla antes de iniciar sesión. Si no te llega en unos minutos, es posible que ya tengas una cuenta — probá "Iniciar sesión".';
         errEl.classList.add('show');
         document.getElementById('auth-form').reset();
+      } else if (authMode === 'recover') {
+        await auth.requestPasswordReset(email, window.location.origin);
+        // Mensaje neutral: no revela si el correo está registrado.
+        errEl.textContent = 'Si el correo está registrado, te enviamos un enlace para restablecer tu contraseña. Revisá tu bandeja de entrada o spam.';
+        errEl.classList.add('show');
+        document.getElementById('auth-email').value = '';
+      } else if (authMode === 'reset') {
+        await auth.updatePassword(password);
+        // Cerrar la sesión temporal de recuperación y volver al login.
+        await auth.signOut().catch(() => {});
+        recoveryMode = false;
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+        setAuthMode('signin');
+        errEl.textContent = 'Contraseña actualizada. Iniciá sesión con tu nueva contraseña.';
+        errEl.classList.add('show');
       }
     } catch (err) {
       if (authMode === 'signin' && err.message === 'Invalid login credentials') {
@@ -138,16 +251,34 @@ function wireAuthScreen() {
     }
   });
 }
+
 async function init() {
   wireAuthScreen();
 
-  const session = await auth.getSession();
-  if (session) {
-    state.user = session.user;
-    await bootstrapApp();
+  if (RECOVERY_IN_URL) {
+    // Llegamos desde el enlace del correo: mostrar el formulario de nueva
+    // contraseña y NO arrancar la app, aunque el enlace haya creado sesión.
+    recoveryMode = true;
+    setAuthMode('reset');
+  } else {
+    const session = await auth.getSession();
+    if (session) {
+      state.user = session.user;
+      await bootstrapApp();
+    }
   }
 
-  auth.onAuthStateChange(async (session) => {
+  auth.onAuthStateChange(async (event, session) => {
+    if (event === 'PASSWORD_RECOVERY') {
+      recoveryMode = true;
+      showAuthScreen();
+      setAuthMode('reset');
+      return;
+    }
+    // Mientras se restablece la contraseña, ignorar los eventos de sesión
+    // (el enlace y updateUser generan sesión, pero no debemos bootstrapear).
+    if (recoveryMode) return;
+
     if (session && !state.user) {
       state.user = session.user;
       await bootstrapApp();

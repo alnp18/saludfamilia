@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SaludFamilia</title>
 <link rel="stylesheet" href="/src/styles.css"/>
+<script>
+  // Se captura ANTES de que cargue el bundle (y por lo tanto antes de que
+  // supabase-js procese y limpie el hash del enlace de recuperación).
+  window.__recoveryInUrl = (location.hash || '').indexOf('type=recovery') !== -1;
+</script>
 </head>
 <body>
 
@@ -21,13 +26,20 @@
     <div class="auth-sub" id="auth-sub">Entra con tu correo y contraseña.</div>
     <div class="auth-error" id="auth-error"></div>
     <form class="auth-form" id="auth-form">
-      <div class="form-field">
+      <div class="form-field" id="auth-email-field">
         <label class="fl">Correo</label>
         <input class="fi" id="auth-email" type="email" required autocomplete="email"/>
       </div>
-      <div class="form-field">
-        <label class="fl">Contraseña</label>
+      <div class="form-field" id="auth-password-field">
+        <label class="fl" id="auth-password-label">Contraseña</label>
         <input class="fi" id="auth-password" type="password" required autocomplete="current-password" minlength="6"/>
+      </div>
+      <div class="form-field hidden" id="auth-confirm-field">
+        <label class="fl">Repetir contraseña</label>
+        <input class="fi" id="auth-confirm" type="password" autocomplete="new-password" minlength="6"/>
+      </div>
+      <div class="auth-forgot" id="auth-forgot-row">
+        <button type="button" id="auth-forgot-btn">¿Olvidaste tu contraseña?</button>
       </div>
       <button class="btn btn-primary" type="submit" id="auth-submit" style="justify-content:center;margin-top:6px">Entrar</button>
     </form>
