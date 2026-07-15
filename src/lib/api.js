@@ -299,6 +299,59 @@ export async function deleteMed(id) {
 }
 
 // ─────────────────────────────────────────
+// FAMILIA (miembros del household + invitaciones)
+// ─────────────────────────────────────────
+export async function listHouseholdMembers(householdId) {
+  // RPC en vez de select directo: el correo vive en auth.users, que no es
+  // accesible desde el cliente. La función solo responde a miembros.
+  const { data, error } = await supabase.rpc('household_members_with_email', {
+    p_household_id: householdId,
+  });
+  if (error) throw error;
+  return data.map(r => ({
+    userId: r.user_id, role: r.role, joinedAt: r.joined_at, email: r.email,
+  }));
+}
+
+export async function listInvitations(householdId) {
+  const { data, error } = await supabase.from('household_invitations').select('*')
+    .eq('household_id', householdId).order('created_at', { ascending: false });
+  if (error) throw error;
+  return data.map(r => ({
+    id: r.id, createdAt: r.created_at, expiresAt: r.expires_at,
+    usedBy: r.used_by, usedAt: r.used_at,
+  }));
+}
+
+/** Devuelve el código en claro — la única vez que existe fuera del hash. */
+export async function createInvitation(householdId) {
+  const { data, error } = await supabase.rpc('create_household_invitation', {
+    p_household_id: householdId,
+  });
+  if (error) throw error;
+  return data;
+}
+
+export async function revokeInvitation(id) {
+  const { error } = await supabase.from('household_invitations').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function redeemInvitation(code) {
+  const { data, error } = await supabase.rpc('redeem_household_invitation', {
+    p_code: code,
+  });
+  if (error) throw error;
+  return { householdId: data.household_id, householdName: data.household_name };
+}
+
+export async function removeMember(householdId, userId) {
+  const { error } = await supabase.from('household_members').delete()
+    .eq('household_id', householdId).eq('user_id', userId);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────
 // VITAL SIGNS
 // ─────────────────────────────────────────
 function rowToVital(r) {
