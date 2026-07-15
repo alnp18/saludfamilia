@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import * as api from '../lib/api.js';
+import * as xport from '../lib/exportImport.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, avatarColor, fmtDate } from '../lib/utils.js';
 
@@ -74,6 +75,16 @@ export async function render() {
         </div>
       </div>
     </div>
+    <div class="card">
+      <div class="card-hd"><h2>Exportar / Importar información</h2></div>
+      <div class="fam-join">
+        <p class="fam-join-help">Exportá pacientes con toda su historia (órdenes, medicamentos, signos vitales y los médicos y centros que referencian) a un archivo cifrado que se descarga a tu dispositivo, e importalo en otra familia. El archivo se protege con una contraseña propia — sin ella no puede abrirse.</p>
+        <div class="fam-join-row">
+          <button class="btn" id="btn-export-info">Exportar información</button>
+          <button class="btn" id="btn-import-info">Importar información</button>
+        </div>
+      </div>
+    </div>
   `;
 
   el.querySelectorAll('[data-remove-id]').forEach(b =>
@@ -84,6 +95,8 @@ export async function render() {
   document.getElementById('join-code').addEventListener('keydown', e => {
     if (e.key === 'Enter') joinFamily();
   });
+  document.getElementById('btn-export-info').addEventListener('click', openExportModal);
+  document.getElementById('btn-import-info').addEventListener('click', openImportModal);
 
   if (isOwner) await renderInvites(members);
 }
@@ -187,6 +200,24 @@ async function joinFamily() {
 
   const btn = document.getElementById('btn-join-family');
   btn.disabled = true;
+
+  // El canje exige una familia vacía (regla de la base). Si hay datos, en
+  // vez de dejar que falle, ofrecer exportarlos primero.
+  try {
+    const [patients, doctors, centers] = await Promise.all([
+      api.listPatients(state.household.id),
+      api.listDoctors(state.household.id),
+      api.listCenters(state.household.id),
+    ]);
+    if (patients.length || doctors.length || centers.length) {
+      btn.disabled = false;
+      offerExportBeforeJoin(patients.length, doctors.length, centers.length);
+      return;
+    }
+  } catch {
+    // Si el chequeo falla, se intenta el canje igual: la base decide.
+  }
+
   try {
     const res = await api.redeemInvitation(code);
     showToast(`Ahora eres parte de "${res.householdName}"`);
@@ -195,6 +226,177 @@ async function joinFamily() {
   } catch (err) {
     showToast(err.message || 'No se pudo canjear el código', 'err');
     btn.disabled = false;
+  }
+}
+
+function offerExportBeforeJoin(nPatients, nDoctors, nCenters) {
+  const parts = [];
+  if (nPatients) parts.push(`${nPatients} paciente${nPatients > 1 ? 's' : ''}`);
+  if (nDoctors) parts.push(`${nDoctors} médico${nDoctors > 1 ? 's' : ''}`);
+  if (nCenters) parts.push(`${nCenters} centro${nCenters > 1 ? 's' : ''} médico${nCenters > 1 ? 's' : ''}`);
+
+  showModal(
+    'Tu familia actual tiene información',
+    `<div class="form-body">
+      <p class="fam-join-help">Tu familia registra ${esc(parts.join(', '))}. Para unirte a otra familia, la tuya debe quedar vacía — así ningún dato se pierde por accidente.</p>
+      <p class="fam-join-help"><strong>¿Deseás exportar la información antes?</strong> Se descarga como archivo cifrado con una contraseña que elijas, y podrás importarla una vez dentro de la familia nueva.</p>
+      <p class="fam-join-help">Los pasos: 1) exportá el archivo y guardalo, 2) eliminá los pacientes, médicos y centros desde sus módulos, 3) volvé acá y canjeá el código.</p>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Exportar información', cls: 'btn btn-primary', action: () => openExportModal() },
+    ]
+  );
+}
+
+// ─────────────────────────────────────────
+// EXPORTAR
+// ─────────────────────────────────────────
+async function openExportModal() {
+  let patients;
+  try {
+    patients = await api.listPatients(state.household.id);
+  } catch (err) {
+    showToast(err.message || 'Error al cargar los pacientes', 'err');
+    return;
+  }
+  if (!patients.length) {
+    showToast('No hay pacientes para exportar', 'warn');
+    return;
+  }
+
+  showModal(
+    'Exportar información',
+    `<div class="form-body">
+      <p class="fam-join-help">Elegí qué pacientes incluir. El archivo lleva su historia completa (órdenes, medicamentos, signos vitales y los médicos/centros referenciados), cifrada con la contraseña que definas acá — no es la de tu cuenta, y si la perdés el archivo no puede abrirse.</p>
+      <div class="fam-export-list">
+        ${patients.map(p => `
+          <label class="fam-export-item">
+            <input type="checkbox" data-patient-id="${p.id}" checked/>
+            <span>${esc(p.nombre)}</span>
+          </label>`).join('')}
+      </div>
+      <div class="form-row cols-2" style="margin-top:12px">
+        <div class="form-field"><label class="fl">Contraseña del archivo (mín. ${xport.MIN_EXPORT_PASSWORD})</label><input class="fi" id="exp-pw" type="password" autocomplete="new-password"/></div>
+        <div class="form-field"><label class="fl">Repetir contraseña</label><input class="fi" id="exp-pw2" type="password" autocomplete="new-password"/></div>
+      </div>
+      <div class="fam-progress" id="exp-progress"></div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Exportar y descargar', cls: 'btn btn-primary', action: () => runExport(patients) },
+    ]
+  );
+}
+
+async function runExport(patients) {
+  const pw = document.getElementById('exp-pw').value;
+  const pw2 = document.getElementById('exp-pw2').value;
+  const progress = document.getElementById('exp-progress');
+  const selectedIds = [...document.querySelectorAll('[data-patient-id]:checked')]
+    .map(cb => cb.dataset.patientId);
+  const selected = patients.filter(p => selectedIds.includes(p.id));
+
+  if (!selected.length) { showToast('Elegí al menos un paciente', 'err'); return; }
+  if (pw.length < xport.MIN_EXPORT_PASSWORD) {
+    showToast(`La contraseña debe tener al menos ${xport.MIN_EXPORT_PASSWORD} caracteres`, 'err');
+    return;
+  }
+  if (pw !== pw2) { showToast('Las contraseñas no coinciden', 'err'); return; }
+
+  try {
+    progress.textContent = 'Reuniendo la información…';
+    const payload = await xport.buildExportPayload(state.household.id, state.household.name, selected);
+    progress.textContent = 'Cifrando…';
+    const envelope = await xport.encryptPayload(payload, pw);
+    const filename = xport.downloadEnvelope(envelope);
+    const s = xport.summarizePayload(payload);
+    closeModal();
+    showToast(`Archivo ${filename} descargado (${s.pacientes} paciente${s.pacientes > 1 ? 's' : ''})`);
+  } catch (err) {
+    progress.textContent = '';
+    showToast(err.message || 'Error al exportar', 'err');
+  }
+}
+
+// ─────────────────────────────────────────
+// IMPORTAR
+// ─────────────────────────────────────────
+function openImportModal() {
+  showModal(
+    'Importar información',
+    `<div class="form-body">
+      <p class="fam-join-help">Elegí el archivo exportado (${esc(xport.FILE_EXTENSION)}) y escribí la contraseña con la que se cifró. Antes de importar vas a ver un resumen de lo que contiene.</p>
+      <div class="form-field"><label class="fl">Archivo</label><input class="fi" id="imp-file" type="file" accept="${esc(xport.FILE_EXTENSION)},application/json"/></div>
+      <div class="form-field"><label class="fl">Contraseña del archivo</label><input class="fi" id="imp-pw" type="password" autocomplete="off"/></div>
+      <div class="fam-progress" id="imp-progress"></div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Leer archivo', cls: 'btn btn-primary', action: readImportFile },
+    ]
+  );
+}
+
+async function readImportFile() {
+  const fileInput = document.getElementById('imp-file');
+  const pw = document.getElementById('imp-pw').value;
+  const progress = document.getElementById('imp-progress');
+  const file = fileInput.files && fileInput.files[0];
+
+  if (!file) { showToast('Elegí el archivo exportado', 'err'); return; }
+  if (!pw) { showToast('Escribí la contraseña del archivo', 'err'); return; }
+
+  let payload;
+  try {
+    progress.textContent = 'Descifrando…';
+    const envelope = await xport.readEnvelopeFile(file);
+    payload = await xport.decryptEnvelope(envelope, pw);
+  } catch (err) {
+    progress.textContent = '';
+    showToast(err.message || 'No se pudo leer el archivo', 'err');
+    return;
+  }
+
+  const s = xport.summarizePayload(payload);
+  const fecha = payload.exportedAt ? fmtDate(payload.exportedAt.slice(0, 10)) : '—';
+  showModal(
+    'Confirmar importación',
+    `<div class="form-body">
+      <p class="fam-join-help">Exportado de "${esc(payload.householdName || '—')}" el ${esc(fecha)}. Se creará en tu familia actual ("${esc(state.household.name)}"):</p>
+      <ul class="fam-summary">
+        <li><strong>${s.pacientes}</strong> paciente${s.pacientes === 1 ? '' : 's'}</li>
+        <li><strong>${s.ordenes}</strong> orden${s.ordenes === 1 ? '' : 'es'} médica${s.ordenes === 1 ? '' : 's'}</li>
+        <li><strong>${s.medicamentos}</strong> medicamento${s.medicamentos === 1 ? '' : 's'}</li>
+        <li><strong>${s.vitales}</strong> registro${s.vitales === 1 ? '' : 's'} de signos vitales</li>
+        <li><strong>${s.medicos}</strong> médico${s.medicos === 1 ? '' : 's'} y <strong>${s.centros}</strong> centro${s.centros === 1 ? '' : 's'} en los directorios</li>
+      </ul>
+      <p class="fam-join-help">Si alguno ya existe en esta familia, se creará igual como entrada nueva (no se fusionan).</p>
+      <div class="fam-progress" id="imp-run-progress"></div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Importar a esta familia', cls: 'btn btn-primary', action: () => runImport(payload) },
+    ]
+  );
+}
+
+async function runImport(payload) {
+  const progress = document.getElementById('imp-run-progress');
+  const footerBtns = document.querySelectorAll('#modal-footer button');
+  footerBtns.forEach(b => (b.disabled = true));
+
+  try {
+    const s = await xport.importPayload(payload, state.household.id,
+      txt => { progress.textContent = txt; });
+    closeModal();
+    showToast(`Importación completa: ${s.pacientes} paciente${s.pacientes === 1 ? '' : 's'} con su historia`);
+    // Refrescar contadores y vista (pacientes nuevos disponibles).
+    setTimeout(() => window.location.reload(), 1200);
+  } catch (err) {
+    footerBtns.forEach(b => (b.disabled = false));
+    progress.textContent = '';
+    showToast(err.message || 'Error durante la importación — puede haber quedado parcial. Revisá los módulos antes de reintentar.', 'err');
   }
 }
 
