@@ -32,11 +32,17 @@
       </div>
       <div class="form-field" id="auth-password-field">
         <label class="fl" id="auth-password-label">Contraseña</label>
-        <input class="fi" id="auth-password" type="password" required autocomplete="current-password" minlength="6"/>
+        <div class="pw-wrap">
+          <input class="fi" id="auth-password" type="password" required autocomplete="current-password" minlength="6"/>
+          <button type="button" class="pw-toggle" id="auth-password-toggle" aria-label="Mostrar contraseña" tabindex="-1"></button>
+        </div>
       </div>
       <div class="form-field hidden" id="auth-confirm-field">
         <label class="fl">Repetir contraseña</label>
-        <input class="fi" id="auth-confirm" type="password" autocomplete="new-password" minlength="6"/>
+        <div class="pw-wrap">
+          <input class="fi" id="auth-confirm" type="password" autocomplete="new-password" minlength="6"/>
+          <button type="button" class="pw-toggle" id="auth-confirm-toggle" aria-label="Mostrar contraseña" tabindex="-1"></button>
+        </div>
       </div>
       <div class="auth-forgot" id="auth-forgot-row">
         <button type="button" id="auth-forgot-btn">¿Olvidaste tu contraseña?</button>

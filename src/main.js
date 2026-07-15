@@ -97,6 +97,25 @@ let recoveryMode = false; // true mientras el usuario restablece su contraseña 
 const RECOVERY_IN_URL = window.__recoveryInUrl === true
   || (window.location.hash || '').includes('type=recovery');
 
+const EYE_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>';
+const EYE_OFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+
+// Muestra u oculta el texto de un campo de contraseña, con el icono acorde.
+function setPwVisible(inputId, btnId, visible) {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  input.type = visible ? 'text' : 'password';
+  btn.innerHTML = visible ? EYE_OFF_SVG : EYE_SVG;
+  btn.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+}
+
+function wirePwToggle(inputId, btnId) {
+  const input = document.getElementById(inputId);
+  document.getElementById(btnId).addEventListener('click', () => {
+    setPwVisible(inputId, btnId, input.type === 'password');
+  });
+}
+
 const AUTH_MODES = {
   signin: {
     title: 'Iniciar sesión',
@@ -172,13 +191,18 @@ function setAuthMode(mode) {
     document.getElementById('auth-switch-btn').textContent = cfg.switchBtn;
   }
 
-  // Limpiar campos sensibles y el mensaje al cambiar de modo.
+  // Limpiar campos sensibles, resetear la visibilidad de contraseña y el
+  // mensaje al cambiar de modo.
   document.getElementById('auth-password').value = '';
   document.getElementById('auth-confirm').value = '';
+  setPwVisible('auth-password', 'auth-password-toggle', false);
+  setPwVisible('auth-confirm', 'auth-confirm-toggle', false);
   document.getElementById('auth-error').classList.remove('show');
 }
 
 function wireAuthScreen() {
+  wirePwToggle('auth-password', 'auth-password-toggle');
+  wirePwToggle('auth-confirm', 'auth-confirm-toggle');
   setAuthMode('signin');
 
   document.getElementById('auth-switch-btn').addEventListener('click', () => {

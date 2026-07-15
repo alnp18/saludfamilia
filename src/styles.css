@@ -663,6 +663,16 @@ body.patient-themed:not(.light-mode) { color-scheme: dark; }
 .auth-forgot { text-align: right; margin-top: -4px; }
 .auth-forgot button { background:none; border:none; color: var(--t-primary-lt); cursor:pointer; font-family: inherit; font-size: 12px; padding: 0; }
 #auth-screen .hidden { display: none; }
+.pw-wrap { position: relative; }
+.pw-wrap .fi { padding-right: 42px; }
+.pw-toggle {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; padding: 6px; cursor: pointer;
+  color: var(--ts); border-radius: var(--r-sm);
+}
+.pw-toggle:hover { color: var(--t-primary-lt); }
+.pw-toggle svg { width: 18px; height: 18px; }
 
 /* ══ RESPONSIVE ══ */
 @media (max-width:1100px) {
