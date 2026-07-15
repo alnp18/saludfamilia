@@ -1,6 +1,6 @@
 # SaludFamilia — Contexto del proyecto
 
-_Última actualización: 2026-07-15 (tras verificación E2E en producción)_
+_Última actualización: 2026-07-15 (verificación E2E + recuperación de contraseña + previsualizar contraseña)_
 
 ## Qué es
 
@@ -18,9 +18,16 @@ recomendado en `docs/Plan_de_Avance_MVP.docx`:
 1. ✅ Verificación E2E formal contra producción — **COMPLETADA** el
    2026-07-15 (signup → paciente → orden → medicamentos → vitales, con
    aislamiento RLS confirmado en ambas direcciones). Detalle abajo.
-2. Una tanda extensa de ajustes de interfaz, ya relevada y lista para
+2. ✅ Recuperación de contraseña (P1 #4) — **COMPLETADA** el 2026-07-15
+   (flujo completo de "olvidé mi contraseña" con evento `PASSWORD_RECOVERY`,
+   verificado E2E en producción con correo real). Detalle abajo.
+3. ✅ Previsualizar contraseña — **COMPLETADA** el 2026-07-15. Mejora no
+   planeada originalmente, agregada a partir de feedback directo del
+   usuario durante el E2E de recuperación (la falta de esta opción llevaba
+   a errores de tipeo al iniciar sesión). Detalle abajo.
+4. Una tanda extensa de ajustes de interfaz, ya relevada y lista para
    ejecutar módulo por módulo (P1.5, Sonnet).
-3. Dos piezas de arquitectura nueva (directorio público auditado y
+5. Dos piezas de arquitectura nueva (directorio público auditado y
    exportar/importar pacientes entre households), diseñadas a alto nivel
    pero sin implementar — requieren cuidado especial por tocar RLS (Fable).
 
@@ -38,6 +45,7 @@ saludfamilia/
 │   ├── lib/
 │   │   ├── supabaseClient.js
 │   │   ├── auth.js            ← signUp/signIn/signOut + ensureHousehold()
+│   │   │                        + requestPasswordReset/updatePassword
 │   │   ├── api.js
 │   │   ├── theme.js            ← ThemeEngine: paleta determinista por paciente
 │   │   ├── icons.js
@@ -142,6 +150,57 @@ pasos PASAN:**
   - "Leaked password protection" desactivado en Auth (WARN) — activar el
     chequeo contra HaveIBeenPwned si se desea.
 
+## Recuperación de contraseña (P1 #4) — completada el 2026-07-15
+
+Diseñada a alto nivel en la sesión del 2026-07-11, implementada y verificada
+E2E en esta sesión. Commits `6674da3` (flujo completo) y `8e6736d`
+(previsualizar contraseña, ver más abajo).
+
+**Flujo implementado:**
+
+1. Enlace "¿Olvidaste tu contraseña?" en la pantalla de login pasa el
+   formulario a modo `recover` (solo pide correo).
+2. `auth.requestPasswordReset(email, window.location.origin)` llama a
+   `supabase.auth.resetPasswordForEmail`, y muestra un mensaje neutro
+   ("Si el correo está registrado, te enviamos un enlace…") — mismo
+   criterio anti-enumeración que el resto del flujo de auth.
+3. El enlace del correo vuelve a la app con `#type=recovery` en la URL.
+   Se captura en un `<script>` inline en el `<head>` de `index.html`
+   (`window.__recoveryInUrl`), **antes** de que cargue el bundle de
+   `supabase-js`, porque `createClient()` procesa y limpia ese hash de la
+   URL apenas se importa — capturarlo dentro de `main.js` llegaba tarde.
+4. El evento `PASSWORD_RECOVERY` de `onAuthStateChange` intercepta la
+   sesión temporal que crea ese enlace y fuerza el modo `reset` (nueva
+   contraseña + repetir), sin dejar que la app haga bootstrap con esa
+   sesión.
+5. Al confirmar, `auth.updatePassword(password)` llama a
+   `supabase.auth.updateUser({ password })`, luego se cierra la sesión
+   temporal (`signOut`), se limpia el hash de la URL y se vuelve al login
+   con mensaje de éxito — así el usuario inicia sesión de nuevo con la
+   contraseña nueva en vez de quedar logueado desde el enlace de
+   recuperación.
+6. Toda la lógica de estados (`signin` / `signup` / `recover` / `reset`)
+   quedó centralizada en un objeto `AUTH_MODES` en `main.js`, que controla
+   qué campos se muestran, textos y navegación entre modos.
+
+**Verificación E2E**: flujo real de punta a punta con el correo del propio
+usuario (`dacn.2026@gmail.com`) contra `saludfamilia.vercel.app` — solicitud
+de recuperación, recepción del correo, click en el enlace, detección
+correcta de la pantalla "Nueva contraseña", cambio de contraseña, y login
+posterior con la contraseña nueva. Confirmado por SQL en Supabase (token de
+recuperación generado y consumido) y por el salto fresco de
+`last_sign_in_at` tras el login con la contraseña nueva.
+
+### Previsualizar contraseña (mejora agregada durante la sesión, no planeada)
+
+Durante la verificación E2E de recuperación, el usuario señaló que no
+existía forma de previsualizar la contraseña antes de iniciar sesión, lo
+que puede llevar a errores de tipeo constantes. Se agregó un botón de
+mostrar/ocultar (íconos ojo / ojo tachado) en los campos de contraseña y
+repetir contraseña del formulario de auth, reseteado a oculto cada vez que
+cambia el modo del formulario. Verificado por el usuario en producción:
+"la visualización está perfecta, super eficiente".
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -157,9 +216,12 @@ pasos PASAN:**
    no-enumerante). Re-confirmada en el E2E.
 5. **P0 #3 — Verificación E2E en producción: COMPLETADA** el 2026-07-15
    (ver sección dedicada arriba).
-6. **Relevamiento extenso de UI/UX** en `docs/Plan_de_Avance_MVP.docx`
+6. **P1 #4 — Recuperación de contraseña: COMPLETADA** el 2026-07-15, junto
+   con la mejora de previsualizar contraseña agregada durante su
+   verificación E2E (ver sección dedicada arriba).
+7. **Relevamiento extenso de UI/UX** en `docs/Plan_de_Avance_MVP.docx`
    (sección P1.5), módulo por módulo.
-7. **Dos piezas de arquitectura diseñadas a alto nivel (sin implementar)**:
+8. **Dos piezas de arquitectura diseñadas a alto nivel (sin implementar)**:
    directorio público auditado y exportar/importar pacientes.
 
 ## Criterio de asignación de agentes de Claude
@@ -169,23 +231,23 @@ pasos PASAN:**
   auditoría RLS pre-lanzamiento (empezar por el WARN de
   `is_household_member`), directorio público auditado, exportar/importar
   pacientes.
-- **Opus**: flujos que cruzan varios archivos y estados — recuperación de
-  contraseña (la verificación E2E ya está hecha).
+- **Opus**: flujos que cruzan varios archivos y estados. La recuperación de
+  contraseña (el caso que motivó este criterio) ya está implementada y
+  verificada E2E; no queda ningún ítem de este tipo pendiente por ahora.
 - **Sonnet**: tareas acotadas y mecánicas — configuración, UI, limpieza,
   contenido. Incluye toda la sección P1.5 de edición de interfaz.
 
 ## Próximos pasos sugeridos para quien retome
 
-1. Con el E2E en producción ya cerrado, el frente más "listo para ejecutar"
-   es la tanda de UI (P1.5, Sonnet): empezar por el patrón transversal
-   'Otra extensible' y el de imágenes ampliables/descargables, que se
-   repiten en varios módulos.
-2. Recuperación de contraseña (P1 #4, Opus) sigue pendiente de implementar.
-3. Antes de tocar cualquier política RLS nueva, reproducir el error primero
+1. Con el E2E en producción y la recuperación de contraseña ya cerrados, el
+   frente más "listo para ejecutar" es la tanda de UI (P1.5, Sonnet):
+   empezar por el patrón transversal 'Otra extensible' y el de imágenes
+   ampliables/descargables, que se repiten en varios módulos.
+2. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
    una transacción con `rollback` (patrón usado con éxito en el E2E para
    verificar aislamiento sin arriesgar datos).
-4. Decidir qué hacer con los datos de prueba conservados (dejarlos como
+3. Decidir qué hacer con los datos de prueba conservados (dejarlos como
    muestra o limpiarlos antes del lanzamiento real).
 
 Ver el plan de avance detallado y priorizado en
