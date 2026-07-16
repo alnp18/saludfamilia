@@ -349,6 +349,7 @@ function rowToOrder(r) {
     auth_numero: r.auth_numero,
     auth_centroId: r.auth_centro_id,
     auth_imagen: r.auth_imagen,
+    auth_meses: r.auth_meses,
     cita_fecha: r.cita_fecha,
     cita_hora: r.cita_hora,
     medicoId_cita: r.medico_id_cita,
@@ -377,6 +378,7 @@ function orderToRow(o, householdId, patientId) {
     auth_numero: o.auth_numero || null,
     auth_centro_id: o.auth_centroId || null,
     auth_imagen: o.auth_imagen || null,
+    auth_meses: o.auth_meses || null,
     cita_fecha: o.cita_fecha || null,
     cita_hora: o.cita_hora || null,
     medico_id_cita: o.medicoId_cita || null,
@@ -412,6 +414,54 @@ export async function saveOrder(order, householdId, patientId) {
 export async function deleteOrder(id) {
   const { error } = await supabase.from('medical_orders').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ─────────────────────────────────────────
+// ORDER AUTHORIZATIONS (tabla "Autorizaciones" — tipo de orden
+// "Medicamentos/Insumos/Terapias", MI AUDITORIA Órdenes #4)
+// Una fila por mes autorizado. El formulario regenera el set completo
+// cada vez que cambia el número de meses, así que se guarda como
+// "reemplazar todo" en vez de update fila por fila — más simple y evita
+// tener que reconciliar altas/bajas de filas intermedias.
+// ─────────────────────────────────────────
+function rowToOrderAuth(r) {
+  return {
+    id: r.id,
+    orderId: r.order_id,
+    mesNumero: r.mes_numero,
+    numeroAutorizacion: r.numero_autorizacion,
+    fechaInicio: r.fecha_inicio,
+    fechaVencimiento: r.fecha_vencimiento,
+    cantidad: r.cantidad,
+    entregado: r.entregado,
+  };
+}
+
+export async function listOrderAuthorizations(orderId) {
+  const { data, error } = await supabase.from('order_authorizations').select('*')
+    .eq('order_id', orderId).order('mes_numero');
+  if (error) throw error;
+  return data.map(rowToOrderAuth);
+}
+
+/** Reemplaza todas las filas de autorizaciones de una orden por `rows`. */
+export async function replaceOrderAuthorizations(orderId, householdId, rows) {
+  const { error: delErr } = await supabase.from('order_authorizations').delete().eq('order_id', orderId);
+  if (delErr) throw delErr;
+  if (!rows.length) return [];
+  const payload = rows.map(r => ({
+    household_id: householdId,
+    order_id: orderId,
+    mes_numero: r.mesNumero,
+    numero_autorizacion: r.numeroAutorizacion || null,
+    fecha_inicio: r.fechaInicio || null,
+    fecha_vencimiento: r.fechaVencimiento || null,
+    cantidad: r.cantidad || null,
+    entregado: !!r.entregado,
+  }));
+  const { data, error } = await supabase.from('order_authorizations').insert(payload).select();
+  if (error) throw error;
+  return data.map(rowToOrderAuth);
 }
 
 // ─────────────────────────────────────────

@@ -8,9 +8,15 @@ import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
 
-const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamento', 'Suministro médico', 'Examen', 'Laboratorio', 'Otro'];
+const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamentos/Insumos/Terapias', 'Examen', 'Laboratorio', 'Otro'];
 const STAGE_ORDER = ['A', 'B', 'C', 'D', 'Finalizado'];
 const STAGE_LABELS = { A: 'Orden', B: 'Solicitud', C: 'Autorización', D: 'Cita', Finalizado: 'Finalizado' };
+// MI AUDITORIA Órdenes #4: este tipo de orden reemplaza la etapa C
+// ("Autorización", un solo registro) por "Autorizaciones" (una fila por
+// mes autorizado) y nunca pasa por la etapa D ("Cita") — se bloquea.
+const AUTH_TABLE_TYPE = 'Medicamentos/Insumos/Terapias';
+const isAuthTableType = (tipoOrden) => tipoOrden === AUTH_TABLE_TYPE;
+const STAGE_LABELS_AUTH = { A: 'Orden', B: 'Solicitud', C: 'Autorizaciones' };
 // Índice comparable de cada pestaña del asistente dentro de STAGE_ORDER —
 // usado para la alerta de "vas a editar una etapa anterior" (ver switchWizTab).
 const TAB_STAGE_IDX = { a: 0, b: 1, c: 2, d: 3 };
@@ -28,6 +34,11 @@ let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
 // -1 = orden nueva (sin restricción de navegación); si no, índice de la
 // etapa ya alcanzada por la orden que se está editando (ver switchWizTab).
 let currentOrderStageIdx = -1;
+// Filas de la tabla "Autorizaciones" (MI AUDITORIA Órdenes #4) en memoria
+// mientras se edita el asistente: [{ mesNumero, numeroAutorizacion,
+// fechaInicio, fechaVencimiento, cantidad, entregado }]. Se guardan todas
+// juntas al enviar el formulario (ver replaceOrderAuthorizations).
+let authRows = [];
 
 export function setPendingOptions(opts) { pendingOptions = opts; }
 
@@ -191,9 +202,15 @@ function renderOrderCard(o, docMap) {
   if (o._stage === 'A') tags.push(`<span class="tag tag-red">Sin tramitar</span>`);
   if (o._stage === 'Finalizado') tags.push(`<span class="tag tag-green">Completado</span>`);
 
-  const steps = STAGE_ORDER.slice(0, 4).map((s, i) => {
+  // MI AUDITORIA Órdenes #4: "Medicamentos/Insumos/Terapias" no pasa por
+  // Cita — su stepper muestra solo 3 etapas (Orden/Solicitud/Autorizaciones)
+  // en vez de 4.
+  const authType = isAuthTableType(o.tipoOrden);
+  const stageLabels = authType ? STAGE_LABELS_AUTH : STAGE_LABELS;
+  const stepCount = authType ? 3 : 4;
+  const steps = STAGE_ORDER.slice(0, stepCount).map((s, i) => {
     const cls = i < stageIdx || o._stage === 'Finalizado' ? 'done' : (i === stageIdx ? 'current' : '');
-    return `<div class="step ${cls}"><div class="step-line"></div><div class="step-dot">${cls === 'done' ? '✓' : (i + 1)}</div><div class="step-label">${STAGE_LABELS[s]}</div></div>`;
+    return `<div class="step ${cls}"><div class="step-line"></div><div class="step-dot">${cls === 'done' ? '✓' : (i + 1)}</div><div class="step-label">${stageLabels[s]}</div></div>`;
   }).join('');
 
   return `<div class="order-card" data-view-order="${o.id}" style="cursor:pointer">
@@ -257,16 +274,35 @@ function pendingSectionHtml(stageLetter, title, message, nextStage) {
   </div>`;
 }
 
-function renderOrderReadView(o, docMap, centerMap) {
+/** Tabla de solo lectura de las filas de "Autorizaciones" (una por mes). */
+function authTableReadHtml(authList) {
+  if (!authList.length) return '<p class="ro-empty-msg">Sin meses registrados.</p>';
+  return `<table class="auth-table auth-table-ro">
+    <thead><tr><th>Mes</th><th>N° autorización</th><th>Inicio</th><th>Vence</th><th>Cantidad</th><th>Entregado</th></tr></thead>
+    <tbody>${authList.map(r => `<tr>
+      <td>${r.mesNumero}</td>
+      <td>${r.numeroAutorizacion ? esc(r.numeroAutorizacion) : '—'}</td>
+      <td>${r.fechaInicio ? fmtDate(r.fechaInicio) : '—'}</td>
+      <td>${r.fechaVencimiento ? fmtDate(r.fechaVencimiento) : '—'}</td>
+      <td>${r.cantidad ? esc(r.cantidad) : '—'}</td>
+      <td style="text-align:center">${r.entregado ? '✓' : '—'}</td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+}
+
+function renderOrderReadView(o, docMap, centerMap, authList) {
   const doc = docMap[o.medicoId];
   const docCita = docMap[o.medicoId_cita];
   const centro = centerMap[o.auth_centroId];
   const stageIdx = STAGE_ORDER.indexOf(o._stage);
+  const authType = isAuthTableType(o.tipoOrden);
   // Próxima etapa a tramitar: la que sigue a la ya alcanzada. Si ya se
   // llegó a "Cita" (o a Finalizado), no hay una próxima pestaña del
   // asistente a la que saltar — se marca Finalizado desde la propia
-  // pestaña D, no con un botón "Actualizar" aparte.
-  const nextStage = stageIdx >= 0 && stageIdx < 3 ? STAGE_ORDER[stageIdx + 1] : null;
+  // pestaña D (o, en este tipo de orden, desde la propia pestaña C), no
+  // con un botón "Actualizar" aparte.
+  let nextStage = stageIdx >= 0 && stageIdx < 3 ? STAGE_ORDER[stageIdx + 1] : null;
+  if (authType && nextStage === 'D') nextStage = null; // este tipo de orden no pasa por Cita
 
   const seccionA = `<div class="ro-section">
     <div class="ro-section-title">A · Orden</div>
@@ -285,18 +321,28 @@ function renderOrderReadView(o, docMap, centerMap) {
     ${o.solicitud_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="solicitud">Ver imagen</button>` : ''}
   </div>` : pendingSectionHtml('B', 'B · Solicitud', 'Aún no se ha tramitado la solicitud.', nextStage);
 
-  const seccionC = stageIdx >= 2 ? `<div class="ro-section">
-    <div class="ro-section-title">C · Autorización</div>
-    ${roField('Fecha de inicio', o.auth_fechaInicio ? fmtDate(o.auth_fechaInicio) : null)}
-    ${roField('Fecha de vencimiento', o.auth_fechaVence ? fmtDate(o.auth_fechaVence) : null)}
-    ${roField('Número de autorización', o.auth_numero ? esc(o.auth_numero) : null)}
-    ${roField('Centro médico', centro ? esc(centro.nombre) : null)}
-    ${centro && (centro.tel1 || centro.tel2) ? roField('Teléfono', [centro.tel1, centro.tel2].filter(Boolean).map(esc).join(' · ')) : ''}
-    ${centro && centro.dir ? roField('Dirección', esc(centro.dir)) : ''}
-    ${o.auth_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="autorizacion">Ver imagen</button>` : ''}
-  </div>` : pendingSectionHtml('C', 'C · Autorización', 'Aún no hay autorización registrada.', nextStage);
+  const seccionC = stageIdx >= 2
+    ? (authType ? `<div class="ro-section">
+        <div class="ro-section-title">C · Autorizaciones ${o._stage === 'Finalizado' ? '<span class="tag tag-green" style="margin-left:6px">Finalizada</span>' : ''}</div>
+        ${roField('Meses autorizados', o.auth_meses ? String(o.auth_meses) : null)}
+        ${roField('Proveedor', centro ? esc(centro.nombre) : null)}
+        ${authTableReadHtml(authList || [])}
+        ${o.auth_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="autorizacion">Ver imagen</button>` : ''}
+      </div>` : `<div class="ro-section">
+        <div class="ro-section-title">C · Autorización</div>
+        ${roField('Fecha de inicio', o.auth_fechaInicio ? fmtDate(o.auth_fechaInicio) : null)}
+        ${roField('Fecha de vencimiento', o.auth_fechaVence ? fmtDate(o.auth_fechaVence) : null)}
+        ${roField('Número de autorización', o.auth_numero ? esc(o.auth_numero) : null)}
+        ${roField('Centro médico', centro ? esc(centro.nombre) : null)}
+        ${centro && (centro.tel1 || centro.tel2) ? roField('Teléfono', [centro.tel1, centro.tel2].filter(Boolean).map(esc).join(' · ')) : ''}
+        ${centro && centro.dir ? roField('Dirección', esc(centro.dir)) : ''}
+        ${o.auth_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="autorizacion">Ver imagen</button>` : ''}
+      </div>`)
+    : pendingSectionHtml('C', authType ? 'C · Autorizaciones' : 'C · Autorización', authType ? 'Aún no se ha registrado la autorización.' : 'Aún no hay autorización registrada.', nextStage);
 
-  const seccionD = stageIdx >= 3 ? `<div class="ro-section">
+  // Este tipo de orden nunca pasa por "Cita" — se omite la sección D en
+  // vez de mostrarla como "pendiente" (nunca dejaría de estarlo).
+  const seccionD = authType ? '' : (stageIdx >= 3 ? `<div class="ro-section">
     <div class="ro-section-title">D · Cita ${o._stage === 'Finalizado' ? '<span class="tag tag-green" style="margin-left:6px">Finalizada</span>' : ''}</div>
     ${roField('Fecha', o.cita_fecha ? fmtDate(o.cita_fecha) : null)}
     ${roField('Hora', o.cita_hora ? esc(o.cita_hora) : null)}
@@ -304,7 +350,7 @@ function renderOrderReadView(o, docMap, centerMap) {
     ${roField('Consultorio', o.cita_consultorio ? esc(o.cita_consultorio) : null)}
     ${roField('Dirección', o.cita_direccion ? esc(o.cita_direccion) : null)}
     ${roField('Indicaciones', o.cita_indicaciones ? esc(o.cita_indicaciones) : null)}
-  </div>` : pendingSectionHtml('D', 'D · Cita', 'Aún no hay cita programada.', nextStage);
+  </div>` : pendingSectionHtml('D', 'D · Cita', 'Aún no hay cita programada.', nextStage));
 
   return `<div class="order-readview">${seccionA}${seccionB}${seccionC}${seccionD}</div>`;
 }
@@ -323,11 +369,12 @@ async function openOrderModal(id) {
   const docMap = Object.fromEntries(doctors.map(d => [d.id, d]));
   const centerMap = Object.fromEntries(centers.map(c => [c.id, c]));
   const doc = docMap[o.medicoId];
+  const authList = isAuthTableType(o.tipoOrden) ? await api.listOrderAuthorizations(id) : [];
 
   const { root } = openViewOverlay({
     title: o.tipoOrden || 'Orden médica',
     subtitle: [doc?.nombre, o.descripcion].filter(Boolean).join(' · ') || 'Orden médica',
-    bodyHtml: renderOrderReadView(o, docMap, centerMap),
+    bodyHtml: renderOrderReadView(o, docMap, centerMap, authList),
     actions: [
       { label: 'Editar', cls: 'btn-primary', onClick: (close) => { close(); openOrderWizard(id); } },
     ],
@@ -419,6 +466,7 @@ async function openOrderWizard(id, prefill, forceTab) {
   orderFiles = { orden: null, solicitud: null, autorizacion: null };
   originalStoredPaths = [];
   currentOrderStageIdx = -1;
+  authRows = [];
 
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
@@ -432,8 +480,13 @@ async function openOrderWizard(id, prefill, forceTab) {
     if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
     originalStoredPaths = files.attachmentPathsOfOrder(o);
     currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
+    if (isAuthTableType(o.tipoOrden)) authRows = await api.listOrderAuthorizations(id);
   }
-  const startTab = o ? TAB_BY_STAGE[o._stage] : 'a';
+  // Este tipo de orden no tiene pestaña D — si la etapa alcanzada fuera
+  // "D" o "Finalizado" (dato legado de antes de esta fusión de tipos), se
+  // aterriza en "c" en vez de en una pestaña inexistente/oculta.
+  let startTab = o ? TAB_BY_STAGE[o._stage] : 'a';
+  if (o && isAuthTableType(o.tipoOrden) && startTab === 'd') startTab = 'c';
 
   const docOptions = doctors.map(d => `<option value="${d.id}" ${o?.medicoId === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
   const docOptionsCita = doctors.map(d => `<option value="${d.id}" ${o?.medicoId_cita === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
@@ -443,8 +496,8 @@ async function openOrderWizard(id, prefill, forceTab) {
     <div class="wiz-tabs" id="wiz-tabs">
       <button class="wiz-tab ${startTab === 'a' ? 'active' : ''}" data-t="a" type="button"><span class="wiz-dot"></span>A · Orden</button>
       <button class="wiz-tab ${startTab === 'b' ? 'active' : ''}" data-t="b" type="button"><span class="wiz-dot"></span>B · Solicitud</button>
-      <button class="wiz-tab ${startTab === 'c' ? 'active' : ''}" data-t="c" type="button"><span class="wiz-dot"></span>C · Autorización</button>
-      <button class="wiz-tab ${startTab === 'd' ? 'active' : ''}" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
+      <button class="wiz-tab ${startTab === 'c' ? 'active' : ''}" data-t="c" type="button"><span class="wiz-dot"></span><span id="wiz-tab-c-label">C · Autorización</span></button>
+      <button class="wiz-tab ${startTab === 'd' ? 'active' : ''} ${isAuthTableType(o?.tipoOrden || prefill?.tipoOrden) ? 'hidden' : ''}" id="wiz-tab-d" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
     </div>
     <div class="wiz-pane ${startTab === 'a' ? 'visible' : ''}" id="pane-a">
       ${!o || o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
@@ -477,22 +530,7 @@ async function openOrderWizard(id, prefill, forceTab) {
       </div>
     </div>
     <div class="wiz-pane ${startTab === 'c' ? 'visible' : ''}" id="pane-c">
-      <div class="form-row cols-2">
-        <div class="form-field"><label class="fl">Fecha de inicio</label><input class="fi" id="of-auth-inicio" type="date"/></div>
-        <div class="form-field"><label class="fl">Fecha de vencimiento</label><input class="fi" id="of-auth-vence" type="date"/></div>
-        <div class="form-field span2"><label class="fl">Número de autorización</label><input class="fi" id="of-auth-num" type="text" placeholder="AUT-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
-        <div class="form-field span2">
-          <label class="fl">Centro médico</label>
-          <div style="display:flex;gap:6px">
-            <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccionar centro…</option>${centerOptions}</select>
-            <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar centro médico al directorio">+</button>
-          </div>
-          <div id="of-centro-newform" class="hidden"></div>
-        </div>
-        <div class="form-field span2"><label class="fl">Imagen de la autorización</label>
-          ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
-        </div>
-      </div>
+      <div id="pane-c-inner"></div>
     </div>
     <div class="wiz-pane ${startTab === 'd' ? 'visible' : ''}" id="pane-d">
       <div class="form-row cols-2">
@@ -528,11 +566,9 @@ async function openOrderWizard(id, prefill, forceTab) {
   document.querySelectorAll('.wiz-tab').forEach(t => t.addEventListener('click', () => switchWizTab(t.dataset.t)));
   wireFileSlot('orden');
   wireFileSlot('solicitud');
-  wireFileSlot('autorizacion');
 
   wireInlineNewDoctor({ primarySelectId: 'of-medico', otherSelectIds: ['of-cita-medico'], addBtnId: 'of-medico-add-btn', formContainerId: 'of-medico-newform', specialties: SPECIALTIES });
   wireInlineNewDoctor({ primarySelectId: 'of-cita-medico', otherSelectIds: ['of-medico'], addBtnId: 'of-cita-medico-add-btn', formContainerId: 'of-cita-medico-newform', specialties: SPECIALTIES });
-  wireInlineNewCenter('of-auth-centro', 'of-centro-add-btn', 'of-centro-newform');
 
   document.getElementById('of-estado').addEventListener('change', (e) => {
     document.getElementById('of-followup-field').classList.toggle('hidden', e.target.value !== 'Finalizado');
@@ -543,10 +579,6 @@ async function openOrderWizard(id, prefill, forceTab) {
     document.getElementById('of-sol-fecha').value = o.solicitud_fecha || '';
     document.getElementById('of-sol-hora').value = o.solicitud_hora || '';
     document.getElementById('of-sol-num').value = o.solicitud_numero || '';
-    document.getElementById('of-auth-inicio').value = o.auth_fechaInicio || '';
-    document.getElementById('of-auth-vence').value = o.auth_fechaVence || '';
-    document.getElementById('of-auth-num').value = o.auth_numero || '';
-    document.getElementById('of-auth-centro').value = o.auth_centroId || '';
     document.getElementById('of-cita-fecha').value = o.cita_fecha || '';
     document.getElementById('of-cita-hora').value = o.cita_hora || '';
     document.getElementById('of-cita-medico').value = o.medicoId_cita || '';
@@ -563,9 +595,135 @@ async function openOrderWizard(id, prefill, forceTab) {
     if (prefill?.medicoId) document.getElementById('of-medico').value = prefill.medicoId;
     if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
   }
-  renderFilePreview('orden'); renderFilePreview('solicitud'); renderFilePreview('autorizacion');
+  renderFilePreview('orden'); renderFilePreview('solicitud');
+
+  // Pane C (Autorización / Autorizaciones) depende del tipo de orden — se
+  // arma aparte y se reconstruye si el usuario cambia el tipo en vivo
+  // (MI AUDITORIA Órdenes #4).
+  renderPaneC(o?.tipoOrden || prefill?.tipoOrden || '', o, centerOptions);
+  document.getElementById('of-tipo').addEventListener('change', (e) => {
+    const newTipo = e.target.value;
+    document.getElementById('wiz-tab-d').classList.toggle('hidden', isAuthTableType(newTipo));
+    document.getElementById('wiz-tab-c-label').textContent = isAuthTableType(newTipo) ? 'C · Autorizaciones' : 'C · Autorización';
+    if (isAuthTableType(newTipo) && document.getElementById('pane-d').classList.contains('visible')) switchWizTab('c');
+    authRows = [];
+    renderPaneC(newTipo, null, centerOptions);
+  });
 
   if (forceTab && forceTab !== startTab) switchWizTab(forceTab);
+}
+
+/** Arma y conecta el contenido de la pestaña C, que difiere según el tipo
+ * de orden (MI AUDITORIA Órdenes #4). `o` solo se usa para precargar
+ * valores ya guardados — se pasa `null` cuando el tipo cambia en vivo,
+ * para no mezclar datos de una variante con la otra. */
+function renderPaneC(tipoOrden, o, centerOptions) {
+  const inner = document.getElementById('pane-c-inner');
+  if (!inner) return;
+  inner.innerHTML = isAuthTableType(tipoOrden) ? `
+    <div class="info-box" style="margin-bottom:16px">Este tipo de orden no incluye la etapa "Cita": se autoriza por varios meses y se hace seguimiento mes a mes hasta marcarla como finalizada.</div>
+    <div class="form-row cols-2">
+      <div class="form-field">
+        <label class="fl">Número de meses autorizados</label>
+        <input class="fi" id="of-auth-meses" type="number" min="1" max="36" placeholder="Ej: 6"/>
+      </div>
+      <div class="form-field">
+        <label class="fl">Proveedor</label>
+        <div style="display:flex;gap:6px">
+          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccionar proveedor…</option>${centerOptions}</select>
+          <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar proveedor al directorio">+</button>
+        </div>
+        <div id="of-centro-newform" class="hidden"></div>
+      </div>
+    </div>
+    <div id="of-auth-rows-container" style="margin-top:6px"></div>
+    <div class="form-row cols-2" style="margin-top:14px">
+      <div class="form-field span2"><label class="fl">Imagen de la autorización (opcional)</label>
+        ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
+      </div>
+      <div class="form-field span2">
+        <label class="cb-row"><input type="checkbox" id="of-auth-finalizado"/> Todas las entregas completadas — marcar esta orden como finalizada</label>
+      </div>
+    </div>
+  ` : `
+    <div class="form-row cols-2">
+      <div class="form-field"><label class="fl">Fecha de inicio</label><input class="fi" id="of-auth-inicio" type="date"/></div>
+      <div class="form-field"><label class="fl">Fecha de vencimiento</label><input class="fi" id="of-auth-vence" type="date"/></div>
+      <div class="form-field span2"><label class="fl">Número de autorización</label><input class="fi" id="of-auth-num" type="text" placeholder="AUT-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
+      <div class="form-field span2">
+        <label class="fl">Centro médico</label>
+        <div style="display:flex;gap:6px">
+          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccionar centro…</option>${centerOptions}</select>
+          <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar centro médico al directorio">+</button>
+        </div>
+        <div id="of-centro-newform" class="hidden"></div>
+      </div>
+      <div class="form-field span2"><label class="fl">Imagen de la autorización</label>
+        ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
+      </div>
+    </div>
+  `;
+
+  wireFileSlot('autorizacion');
+  wireInlineNewCenter('of-auth-centro', 'of-centro-add-btn', 'of-centro-newform');
+  renderFilePreview('autorizacion');
+
+  if (isAuthTableType(tipoOrden)) {
+    const mesesInput = document.getElementById('of-auth-meses');
+    if (o) {
+      mesesInput.value = o.auth_meses || '';
+      document.getElementById('of-auth-centro').value = o.auth_centroId || '';
+      document.getElementById('of-auth-finalizado').checked = o.estadoCita === 'Finalizado';
+    }
+    mesesInput.addEventListener('input', () => regenerateAuthRows(mesesInput.value));
+    regenerateAuthRows(mesesInput.value);
+  } else if (o) {
+    document.getElementById('of-auth-inicio').value = o.auth_fechaInicio || '';
+    document.getElementById('of-auth-vence').value = o.auth_fechaVence || '';
+    document.getElementById('of-auth-num').value = o.auth_numero || '';
+    document.getElementById('of-auth-centro').value = o.auth_centroId || '';
+  }
+}
+
+/** Ajusta `authRows` a `meses` filas (1..N), conservando los valores ya
+ * escritos para los meses que se mantienen, y vuelve a pintar la tabla. */
+function regenerateAuthRows(mesesValue) {
+  const n = Math.max(0, Math.min(36, parseInt(mesesValue, 10) || 0));
+  const next = [];
+  for (let i = 1; i <= n; i++) {
+    next.push(authRows.find(r => r.mesNumero === i) || {
+      mesNumero: i, numeroAutorizacion: '', fechaInicio: '', fechaVencimiento: '', cantidad: '', entregado: false,
+    });
+  }
+  authRows = next;
+  renderAuthRowsTable();
+}
+
+function renderAuthRowsTable() {
+  const container = document.getElementById('of-auth-rows-container');
+  if (!container) return;
+  if (!authRows.length) {
+    container.innerHTML = '<p style="font-size:12.5px;color:var(--ts);margin:0">Escribe el número de meses para generar la tabla mes a mes.</p>';
+    return;
+  }
+  container.innerHTML = `<table class="auth-table">
+    <thead><tr><th>Mes</th><th>N° autorización</th><th>Fecha inicio</th><th>Fecha vencimiento</th><th>Cantidad</th><th>Entregado</th></tr></thead>
+    <tbody>${authRows.map(r => `<tr>
+      <td>${r.mesNumero}</td>
+      <td><input class="fi" data-auth-mes="${r.mesNumero}" data-auth-field="numeroAutorizacion" type="text" value="${esc(r.numeroAutorizacion || '')}"/></td>
+      <td><input class="fi" data-auth-mes="${r.mesNumero}" data-auth-field="fechaInicio" type="date" value="${r.fechaInicio || ''}"/></td>
+      <td><input class="fi" data-auth-mes="${r.mesNumero}" data-auth-field="fechaVencimiento" type="date" value="${r.fechaVencimiento || ''}"/></td>
+      <td><input class="fi" data-auth-mes="${r.mesNumero}" data-auth-field="cantidad" type="text" value="${esc(r.cantidad || '')}"/></td>
+      <td style="text-align:center"><input type="checkbox" data-auth-mes="${r.mesNumero}" data-auth-field="entregado" ${r.entregado ? 'checked' : ''}/></td>
+    </tr>`).join('')}</tbody>
+  </table>`;
+  container.querySelectorAll('[data-auth-mes]').forEach(el => {
+    el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => {
+      const row = authRows.find(r => r.mesNumero === Number(el.dataset.authMes));
+      if (!row) return;
+      row[el.dataset.authField] = el.type === 'checkbox' ? el.checked : el.value;
+    });
+  });
 }
 
 /** Las etapas se navegan como páginas. Editar una etapa anterior a la ya
@@ -607,31 +765,40 @@ async function uploadNewAttachments(obj, orderId) {
 async function saveOrderForm(editId) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
+  const tipoOrden = document.getElementById('of-tipo').value;
+  const authType = isAuthTableType(tipoOrden);
+
   const obj = {
     id: editId || undefined,
     medicoId: document.getElementById('of-medico').value,
     fechaOrden: document.getElementById('of-fecha').value,
-    tipoOrden: document.getElementById('of-tipo').value,
+    tipoOrden,
     descripcion: document.getElementById('of-desc').value.trim(),
     orden_archivo: orderFiles.orden,
     solicitud_fecha: document.getElementById('of-sol-fecha').value,
     solicitud_hora: document.getElementById('of-sol-hora').value,
     solicitud_numero: document.getElementById('of-sol-num').value.trim(),
     solicitud_imagen: orderFiles.solicitud,
-    auth_fechaInicio: document.getElementById('of-auth-inicio').value,
-    auth_fechaVence: document.getElementById('of-auth-vence').value,
-    auth_numero: document.getElementById('of-auth-num').value.trim(),
+    // Etapa C: "Autorización" (un registro) vs "Autorizaciones" (tabla
+    // mes a mes, MI AUDITORIA Órdenes #4) — solo uno de los dos juegos de
+    // campos existe en el DOM según el tipo de orden actual.
+    auth_fechaInicio: authType ? '' : document.getElementById('of-auth-inicio').value,
+    auth_fechaVence: authType ? '' : document.getElementById('of-auth-vence').value,
+    auth_numero: authType ? '' : document.getElementById('of-auth-num').value.trim(),
     auth_centroId: document.getElementById('of-auth-centro').value,
     auth_imagen: orderFiles.autorizacion,
+    auth_meses: authType ? (parseInt(document.getElementById('of-auth-meses').value, 10) || null) : null,
     cita_fecha: document.getElementById('of-cita-fecha').value,
     cita_hora: document.getElementById('of-cita-hora').value,
     medicoId_cita: document.getElementById('of-cita-medico').value,
     cita_consultorio: document.getElementById('of-cita-consul').value.trim(),
     cita_direccion: document.getElementById('of-cita-dir').value.trim(),
     cita_indicaciones: document.getElementById('of-cita-ind').value.trim(),
-    estadoCita: document.getElementById('of-estado').value,
+    estadoCita: authType
+      ? (document.getElementById('of-auth-finalizado')?.checked ? 'Finalizado' : '')
+      : document.getElementById('of-estado').value,
   };
-  const wantsFollowUp = obj.estadoCita === 'Finalizado' && !!document.getElementById('of-followup')?.checked;
+  const wantsFollowUp = !authType && obj.estadoCita === 'Finalizado' && !!document.getElementById('of-followup')?.checked;
 
   if (!obj.fechaOrden) { showToast('La fecha de la orden es obligatoria', 'err'); switchWizTab('a'); return; }
   if (!obj.tipoOrden) { showToast('Selecciona el tipo de orden', 'err'); switchWizTab('a'); return; }
@@ -660,6 +827,15 @@ async function saveOrderForm(editId) {
     // quitados en esta edición). Mejor esfuerzo, después de guardar.
     const keptPaths = files.attachmentPathsOfOrder(saved);
     files.removeAttachments(originalStoredPaths.filter(p => !keptPaths.includes(p)));
+
+    // Tabla "Autorizaciones" (una fila por mes, MI AUDITORIA Órdenes #4): se
+    // reemplaza el set completo. Si la orden ya existía y cambió de tipo
+    // dejando de ser "Medicamentos/Insumos/Terapias", se limpian filas viejas.
+    if (authType) {
+      await api.replaceOrderAuthorizations(saved.id, state.household.id, authRows);
+    } else if (editId) {
+      await api.replaceOrderAuthorizations(saved.id, state.household.id, []);
+    }
 
     closeModal();
     showToast(editId ? 'Orden actualizada' : 'Orden creada correctamente');
