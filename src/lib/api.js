@@ -175,6 +175,46 @@ export async function deletePatientPolicy(id) {
 }
 
 // ─────────────────────────────────────────
+// PATIENT DIAGNOSES (condiciones crónicas — MI AUDITORIA #5)
+// Solo carga manual del código CIE10 por ahora (ver migración 0014); no
+// hay update porque el único flujo hoy es agregar y, si hace falta,
+// eliminar y volver a agregar.
+// ─────────────────────────────────────────
+function rowToDiagnosis(r) {
+  return {
+    id: r.id,
+    patientId: r.patient_id,
+    codigoCie10: r.codigo_cie10,
+    descripcion: r.descripcion,
+    creadoEn: r.created_at,
+  };
+}
+
+export async function listPatientDiagnoses(patientId) {
+  const { data, error } = await supabase.from('patient_diagnoses').select('*')
+    .eq('patient_id', patientId).order('created_at');
+  if (error) throw error;
+  return data.map(rowToDiagnosis);
+}
+
+export async function addPatientDiagnosis(diagnosis, householdId, patientId) {
+  const row = {
+    household_id: householdId,
+    patient_id: patientId,
+    codigo_cie10: diagnosis.codigoCie10,
+    descripcion: diagnosis.descripcion || null,
+  };
+  const { data, error } = await supabase.from('patient_diagnoses').insert(row).select().single();
+  if (error) throw error;
+  return rowToDiagnosis(data);
+}
+
+export async function deletePatientDiagnosis(id) {
+  const { error } = await supabase.from('patient_diagnoses').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────
 // CATÁLOGOS EXTENSIBLES ("Otra" → texto libre → se suma a las opciones)
 // Genérico por household + categoría — reutilizable para pólizas
 // (Pacientes), vía de administración (Medicamentos) y especialidad

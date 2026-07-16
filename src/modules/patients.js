@@ -38,6 +38,12 @@ let currentAvatarFoto = null;   // { name, type, size, path } ya guardado, o nul
 let pendingAvatarImage = null;  // { name, type, data } recién elegido, sin subir
 let avatarRemoved = false;      // el usuario pidió quitar la foto actual
 
+// Condiciones crónicas (MI AUDITORIA #5). El checkbox solo muestra/oculta
+// la sección (lista + mini-formulario de alta) — nunca borra nada por sí
+// mismo; los diagnósticos se quitan uno por uno con su botón de eliminar.
+let cronicoSectionOpen = null; // null = aún no se sabe (se decide al cargar según si ya tiene diagnósticos)
+let cronicoAddOpen = false;    // mini-formulario "+ Agregar diagnóstico" abierto
+
 export async function render() {
   const container = document.getElementById('view-patients');
   if (!container) return;
@@ -128,9 +134,10 @@ function pvField(label, value) {
  * un segundo formulario duplicado.
  */
 async function openPatientViewMode(id) {
-  const [patient, policies] = await Promise.all([
+  const [patient, policies, diagnoses] = await Promise.all([
     api.getPatient(id),
     api.listPatientPolicies(id),
+    api.listPatientDiagnoses(id),
   ]);
   const age = patient.fechaNacimiento ? calcAge(patient.fechaNacimiento) + ' años' : null;
   const ce = patient.contactoEmergencia;
@@ -178,6 +185,16 @@ async function openPatientViewMode(id) {
     <div class="pv-section-title">Pólizas de seguro</div>
     ${policiesHtml}
 
+    ${diagnoses.length ? `
+      <div class="pv-section-title">Condiciones crónicas</div>
+      ${diagnoses.map(d => `
+        <div class="policy-item">
+          <div class="policy-info">
+            <div class="policy-tipo" style="font-family:'JetBrains Mono',monospace">${esc(d.codigoCie10)}</div>
+            <div class="policy-num">${d.descripcion ? esc(d.descripcion) : 'Sin descripción'}</div>
+          </div>
+        </div>`).join('')}` : ''}
+
     ${patient.notas ? `
       <div class="pv-section-title">Notas</div>
       <div style="font-size:13px;color:var(--tp);line-height:1.6;white-space:pre-wrap">${esc(patient.notas)}</div>` : ''}
@@ -208,6 +225,8 @@ function openPatientModal(id) {
   currentAvatarFoto = null;
   pendingAvatarImage = null;
   avatarRemoved = false;
+  cronicoSectionOpen = null;
+  cronicoAddOpen = false;
   showModal(
     editing ? 'Editar paciente' : 'Nuevo paciente',
     `<div class="form-body">
@@ -276,6 +295,11 @@ function openPatientModal(id) {
         ${editing ? '' : '<p style="font-size:12.5px;color:var(--ts);margin:0">Podrás agregar pólizas después de crear el paciente.</p>'}
       </div>
 
+      <div class="form-section-title">Condiciones crónicas</div>
+      <div id="pf-diagnoses-container">
+        ${editing ? '' : '<p style="font-size:12.5px;color:var(--ts);margin:0">Podrás registrar diagnósticos después de crear el paciente.</p>'}
+      </div>
+
       <div class="form-row cols-2" style="margin-top:14px">
         <div class="form-field span2">
           <label class="fl">Notas</label>
@@ -291,6 +315,7 @@ function openPatientModal(id) {
   if (id) {
     fillPatientForm(id);
     renderPoliciesSection(id);
+    renderDiagnosesSection(id);
   }
 }
 
@@ -587,6 +612,110 @@ async function deletePolicyConfirm(id, patientId) {
     renderPoliciesSection(patientId);
   } catch (err) {
     showToast(err.message || 'Error al eliminar la póliza', 'err');
+  }
+}
+
+// ─────────────────────────────────────────
+// Condiciones crónicas / diagnósticos CIE10 (MI AUDITORIA #5)
+// Por ahora solo carga MANUAL del código (el usuario ya lo conoce). La
+// búsqueda por código o nombre queda deferida a una fase futura — ver nota
+// en la migración 0014.
+// ─────────────────────────────────────────
+async function renderDiagnosesSection(patientId) {
+  const container = document.getElementById('pf-diagnoses-container');
+  if (!container) return;
+
+  const diagnoses = await api.listPatientDiagnoses(patientId);
+  if (cronicoSectionOpen === null) cronicoSectionOpen = diagnoses.length > 0;
+
+  const listHtml = diagnoses.length ? `
+    <div id="pf-diagnoses-list" style="margin-top:8px">${diagnoses.map(d => `
+      <div class="policy-item">
+        <div class="policy-info">
+          <div class="policy-tipo" style="font-family:'JetBrains Mono',monospace">${esc(d.codigoCie10)}</div>
+          <div class="policy-num">${d.descripcion ? esc(d.descripcion) : 'Sin descripción'}</div>
+        </div>
+        <button type="button" class="btn btn-sm btn-icon btn-danger" data-delete-diagnosis="${d.id}" title="Eliminar">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>`).join('')}</div>` : '';
+
+  container.innerHTML = `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;margin-bottom:4px">
+      <input type="checkbox" id="pf-cronicos-check" ${cronicoSectionOpen ? 'checked' : ''}/>
+      <span style="font-size:13px;font-weight:600">Paciente con condiciones crónicas</span>
+    </label>
+    ${cronicoSectionOpen ? `
+      ${listHtml || '<p style="font-size:12.5px;color:var(--ts);margin:4px 0 0">Sin diagnósticos registrados.</p>'}
+      ${cronicoAddOpen ? `
+        <div class="form-row cols-2" style="margin-top:8px">
+          <div class="form-field">
+            <label class="fl">Código CIE10</label>
+            <input class="fi" id="pf-diag-codigo" type="text" placeholder="Ej: E11.9" style="font-family:'JetBrains Mono',monospace"/>
+          </div>
+          <div class="form-field">
+            <label class="fl">Descripción (opcional)</label>
+            <input class="fi" id="pf-diag-desc" type="text" placeholder="Ej: Diabetes tipo 2"/>
+          </div>
+        </div>
+        <p style="font-size:11.5px;color:var(--tm);margin:6px 0 0">Búsqueda por nombre o código: pendiente (requiere definir la fuente de datos CIE10). Por ahora se ingresa el código manualmente.</p>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button type="button" class="btn btn-sm btn-primary" id="pf-diag-save-btn">Agregar diagnóstico</button>
+          <button type="button" class="btn btn-sm" id="pf-diag-cancel-btn">Cancelar</button>
+        </div>
+      ` : `<button type="button" class="btn btn-sm" id="pf-diag-add-btn" style="margin-top:8px">+ Agregar diagnóstico</button>`}
+    ` : ''}
+  `;
+
+  container.querySelectorAll('[data-delete-diagnosis]').forEach(el =>
+    el.addEventListener('click', () => deleteDiagnosisConfirm(el.dataset.deleteDiagnosis, patientId)));
+
+  document.getElementById('pf-cronicos-check').addEventListener('change', (e) => {
+    cronicoSectionOpen = e.target.checked;
+    if (!cronicoSectionOpen) cronicoAddOpen = false;
+    renderDiagnosesSection(patientId);
+  });
+
+  if (cronicoSectionOpen) {
+    if (cronicoAddOpen) {
+      document.getElementById('pf-diag-save-btn').addEventListener('click', () => saveDiagnosisInline(patientId));
+      document.getElementById('pf-diag-cancel-btn').addEventListener('click', () => {
+        cronicoAddOpen = false;
+        renderDiagnosesSection(patientId);
+      });
+    } else {
+      document.getElementById('pf-diag-add-btn').addEventListener('click', () => {
+        cronicoAddOpen = true;
+        renderDiagnosesSection(patientId);
+      });
+    }
+  }
+}
+
+async function saveDiagnosisInline(patientId) {
+  const codigoCie10 = document.getElementById('pf-diag-codigo').value.trim();
+  if (!codigoCie10) {
+    showToast('Escribe el código CIE10', 'err'); return;
+  }
+  const descripcion = document.getElementById('pf-diag-desc').value.trim();
+  try {
+    await api.addPatientDiagnosis({ codigoCie10, descripcion }, state.household.id, patientId);
+    cronicoAddOpen = false;
+    showToast('Diagnóstico agregado');
+    renderDiagnosesSection(patientId);
+  } catch (err) {
+    showToast(err.message || 'Error al guardar el diagnóstico', 'err');
+  }
+}
+
+async function deleteDiagnosisConfirm(id, patientId) {
+  if (!confirm('¿Eliminar este diagnóstico?')) return;
+  try {
+    await api.deletePatientDiagnosis(id);
+    showToast('Diagnóstico eliminado', 'warn');
+    renderDiagnosesSection(patientId);
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el diagnóstico', 'err');
   }
 }
 
