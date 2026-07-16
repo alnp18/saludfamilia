@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
+import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, initials, avatarColor, calcAge } from '../lib/utils.js';
 
@@ -332,7 +333,7 @@ async function renderPoliciesSection(patientId) {
   container.querySelectorAll('[data-view-policy]').forEach(el =>
     el.addEventListener('click', () => {
       const pol = policies.find(x => x.id === el.dataset.viewPolicy);
-      if (pol?.imagen) files.openAttachment(pol.imagen);
+      if (pol?.imagen) openAttachmentViewer(pol.imagen);
     }));
 
   if (policyFormOpen) {

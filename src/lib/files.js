@@ -165,19 +165,3 @@ export async function processUploadFile(file) {
   }
   return { name, type, data: dataUrl };
 }
-
-/**
- * Abre un adjunto en una pestaña nueva: con URL firmada si vive en
- * Storage, o vía blob temporal si es del formato viejo (base64).
- */
-export async function openAttachment(att) {
-  if (isStored(att)) {
-    const url = await getSignedUrl(att.path, 300);
-    window.open(url, '_blank', 'noopener');
-  } else if (att && att.data) {
-    const blob = dataUrlToBlob(att.data);
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-  }
-}

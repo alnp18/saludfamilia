@@ -313,6 +313,56 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 .modal-close svg { width: 14px; height: 14px; }
 .modal-ft { padding: 13px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ══ VISOR DE ADJUNTOS (imágenes/PDF) ══
+   Ventana sobrepuesta propia, NUNCA una pestaña nueva — ver src/lib/viewer.js.
+   z-index 950: por encima del modal genérico (500, puede seguir abierto
+   detrás), por debajo del toast (999) para que los avisos de error sigan
+   visibles. La barra superior es sticky y nunca se mueve al arrastrar o
+   ampliar el documento (eso solo transforma .viewer-content). */
+.viewer-overlay {
+  position: fixed; inset: 0; z-index: 950;
+  background: rgba(0,0,0,.86);
+  display: flex; flex-direction: column;
+}
+.viewer-bar {
+  flex-shrink: 0; height: 52px; position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 14px; padding: 0 14px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.viewer-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--tp);
+}
+.viewer-zoom { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.viewer-zoom-pct { font-size: 12px; color: var(--ts); width: 44px; text-align: center; }
+.viewer-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.viewer-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--card); color: var(--tp); cursor: pointer; font-size: 16px; line-height: 1;
+}
+.viewer-btn:hover { background: var(--hover); }
+.viewer-btn:disabled { opacity: .4; cursor: default; }
+.viewer-btn svg { width: 16px; height: 16px; }
+.viewer-stage {
+  flex: 1; overflow: hidden; position: relative;
+  display: flex; align-items: center; justify-content: center;
+}
+.viewer-stage.zoomed { cursor: grab; }
+.viewer-stage.zoomed.dragging { cursor: grabbing; }
+.viewer-content {
+  width: 100%; height: 100%; transform-origin: center center; will-change: transform;
+  display: flex; align-items: center; justify-content: center;
+}
+.viewer-content img { max-width: 100%; max-height: 100%; object-fit: contain; user-select: none; }
+.viewer-content iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+/* A 100% el iframe conserva su scroll nativo (útil en un PDF de varias
+   páginas); al ampliar, el arrastre propio del visor toma el control y el
+   contenido deja de recibir eventos de puntero para no competir con él. */
+.viewer-stage.zoomed .viewer-content img,
+.viewer-stage.zoomed .viewer-content iframe { pointer-events: none; }
+.viewer-loading, .viewer-error { color: var(--ts); font-size: 14px; }
+
 /* ══ EMPTY STATE ══ */
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;

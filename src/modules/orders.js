@@ -1,6 +1,7 @@
 import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
+import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
@@ -254,7 +255,7 @@ async function openOrderModal(id) {
 
   document.querySelectorAll('[data-view-file]').forEach(btn => btn.addEventListener('click', () => {
     const field = FILE_SLOTS[btn.dataset.viewFile];
-    files.openAttachment(o[field]).catch(err => showToast(err.message || 'No se pudo abrir el archivo', 'err'));
+    openAttachmentViewer(o[field]);
   }));
 }
 
@@ -291,8 +292,7 @@ function renderFilePreview(slot) {
     }).catch(() => {});
   }
   el.querySelector('[data-open-slot]')?.addEventListener('click', () =>
-    files.openAttachment(orderFiles[slot]).catch(err =>
-      showToast(err.message || 'No se pudo abrir el archivo', 'err')));
+    openAttachmentViewer(orderFiles[slot]));
   el.querySelector('[data-remove-slot]')?.addEventListener('click', () => { orderFiles[slot] = null; renderFilePreview(slot); });
 }
 
