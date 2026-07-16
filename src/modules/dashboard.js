@@ -162,7 +162,7 @@ export async function render() {
     <div class="dpb" id="dash-patient-bar">
       <div class="dpb-avatar" style="background:${dpbGrad};font-size:22px;">${initials(patient.nombre)}</div>
       <div>
-        <div class="dpb-title">Hola · ${esc(patient.nombre.split(' ')[0])}</div>
+        <div class="dpb-title">Hola · ${esc(patient.primerNombre || patient.nombre.split(' ')[0])}</div>
         <div class="dpb-sub">${esc(patient.nombre)}</div>
         <div class="dpb-chips">
           ${age ? `<span class="dpb-chip">${age}</span>` : ''}

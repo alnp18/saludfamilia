@@ -2,7 +2,7 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
-import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
+import { esc, fmtDate, today, daysFrom, readFileAsDataURL } from '../lib/utils.js';
 
 const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamento', 'Suministro médico', 'Examen', 'Laboratorio', 'Otro'];
 const STAGE_ORDER = ['A', 'B', 'C', 'D', 'Finalizado'];
@@ -137,15 +137,6 @@ async function deleteOrderConfirm(id) {
   files.removeAttachments(paths);
   showToast('Orden eliminada', 'warn');
   render();
-}
-
-function readFileAsDataURL(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
 }
 
 async function handleFileInput(inputEl, slot) {

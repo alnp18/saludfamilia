@@ -45,3 +45,14 @@ export function calcAgeDecimal(dob) {
   const d = new Date(dob), n = new Date();
   return (n - d) / (365.25 * 24 * 3600 * 1000);
 }
+
+/** Lee un File como data-URL (base64) — usado para previsualizar/adjuntar
+ * archivos en memoria antes de subirlos a Storage. */
+export function readFileAsDataURL(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}

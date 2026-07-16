@@ -10,15 +10,30 @@ import { supabase } from './supabaseClient.js';
 // ─────────────────────────────────────────
 // PATIENTS
 // ─────────────────────────────────────────
-function rowToPatient(r) {
+// rowToPatient/patientToRow y sus respaldos de formato legado se exportan
+// solo para poder probarlos de forma aislada (son funciones puras, sin I/O);
+// el resto de la app los sigue usando a través de las funciones de arriba.
+export function rowToPatient(r) {
   return {
     id: r.id,
-    nombre: r.nombre,
+    primerNombre: r.primer_nombre,
+    segundoNombre: r.segundo_nombre,
+    primerApellido: r.primer_apellido,
+    segundoApellido: r.segundo_apellido,
+    // Nombre completo ensamblado — se mantiene por compatibilidad para todo
+    // lugar que solo necesita MOSTRAR el nombre (avatar, listados, header,
+    // dashboard, etc.): no hay que tocar esos módulos, ya que arman el
+    // nombre desde acá, en un único lugar (ver P1.5 — Ficha de Paciente).
+    nombre: [r.primer_nombre, r.segundo_nombre, r.primer_apellido, r.segundo_apellido]
+      .filter(Boolean).join(' '),
     fechaNacimiento: r.fecha_nacimiento,
     sexo: r.sexo,
     tipoSangre: r.tipo_sangre,
     eps: r.eps,
     numeroAfiliado: r.numero_afiliado,
+    direccion: r.direccion,
+    // Antes texto libre; ahora una estructura (nombre, parentesco, teléfonos,
+    // dirección, ciudad) — ver P1.5. Puede venir null si nunca se llenó.
     contactoEmergencia: r.contacto_emergencia,
     notas: r.notas,
     // Columna legada: ya no se lee/escribe desde la UI (ver P1.5 — el modo
@@ -29,16 +44,50 @@ function rowToPatient(r) {
     creadoEn: r.created_at,
   };
 }
-function patientToRow(p, householdId) {
+/**
+ * Split heurístico del "nombre" de texto libre (formato viejo, anterior a
+ * P1.5) en las 4 columnas actuales — mismo criterio que la migración SQL
+ * 0009. Solo se usa como respaldo al importar un .sfam exportado antes de
+ * este cambio, para no perder el nombre en vez de guardarlo vacío.
+ */
+export function splitNombreLegado(nombre) {
+  const w = (nombre || '').trim().split(/\s+/).filter(Boolean);
+  if (!w.length) return { primerNombre: '', segundoNombre: '', primerApellido: '', segundoApellido: '' };
+  if (w.length === 1) return { primerNombre: w[0], segundoNombre: '', primerApellido: '', segundoApellido: '' };
+  if (w.length === 2) return { primerNombre: w[0], segundoNombre: '', primerApellido: w[1], segundoApellido: '' };
+  if (w.length === 3) return { primerNombre: w[0], segundoNombre: '', primerApellido: w[1], segundoApellido: w[2] };
+  return { primerNombre: w[0], segundoNombre: w[1], primerApellido: w[2], segundoApellido: w.slice(3).join(' ') };
+}
+
+/** Mismo respaldo que splitNombreLegado, para el contacto de emergencia
+ * cuando llega como texto libre "Nombre · relación · teléfono" (formato
+ * viejo, anterior a P1.5) en vez de la estructura actual. */
+export function splitContactoLegado(str) {
+  const seg = (str || '').split('·').map(s => s.trim());
+  return {
+    primerNombre: seg[0] || '', segundoNombre: '', primerApellido: '', segundoApellido: '',
+    parentesco: '', telefono1: seg[2] || '', telefono2: '', direccion: '', ciudad: '',
+  };
+}
+
+export function patientToRow(p, householdId) {
+  const legacyNombre = (!p.primerNombre && !p.primerApellido && p.nombre) ? splitNombreLegado(p.nombre) : null;
+  const contactoEmergencia = typeof p.contactoEmergencia === 'string'
+    ? splitContactoLegado(p.contactoEmergencia)
+    : (p.contactoEmergencia || null);
   return {
     household_id: householdId,
-    nombre: p.nombre,
+    primer_nombre: (p.primerNombre || legacyNombre?.primerNombre || '').trim(),
+    segundo_nombre: (p.segundoNombre || legacyNombre?.segundoNombre || '').trim() || null,
+    primer_apellido: (p.primerApellido || legacyNombre?.primerApellido || '').trim(),
+    segundo_apellido: (p.segundoApellido || legacyNombre?.segundoApellido || '').trim() || null,
     fecha_nacimiento: p.fechaNacimiento || null,
     sexo: p.sexo || null,
     tipo_sangre: p.tipoSangre || null,
     eps: p.eps || null,
     numero_afiliado: p.numeroAfiliado || null,
-    contacto_emergencia: p.contactoEmergencia || null,
+    direccion: p.direccion || null,
+    contacto_emergencia: contactoEmergencia,
     notas: p.notas || null,
     light_mode: false, // deprecado (ver P1.5); columna conservada por compatibilidad
   };
@@ -46,7 +95,7 @@ function patientToRow(p, householdId) {
 
 export async function listPatients(householdId) {
   const { data, error } = await supabase.from('patients').select('*')
-    .eq('household_id', householdId).order('nombre');
+    .eq('household_id', householdId).order('primer_nombre').order('primer_apellido');
   if (error) throw error;
   return data.map(rowToPatient);
 }
@@ -72,6 +121,73 @@ export async function savePatient(patient, householdId) {
 export async function deletePatient(id) {
   const { error } = await supabase.from('patients').delete().eq('id', id);
   if (error) throw error;
+}
+
+// ─────────────────────────────────────────
+// PATIENT POLICIES (pólizas de seguro adicionales — ficha de paciente)
+// ─────────────────────────────────────────
+function rowToPolicy(r) {
+  return {
+    id: r.id,
+    patientId: r.patient_id,
+    tipo: r.tipo,
+    numeroPoliza: r.numero_poliza,
+    imagen: r.imagen,
+    creadoEn: r.created_at,
+  };
+}
+
+export async function listPatientPolicies(patientId) {
+  const { data, error } = await supabase.from('patient_policies').select('*')
+    .eq('patient_id', patientId).order('created_at');
+  if (error) throw error;
+  return data.map(rowToPolicy);
+}
+
+export async function savePatientPolicy(policy, householdId, patientId) {
+  const row = {
+    household_id: householdId,
+    patient_id: patientId,
+    tipo: policy.tipo,
+    numero_poliza: policy.numeroPoliza || null,
+    imagen: policy.imagen || null,
+  };
+  if (policy.id) {
+    const { data, error } = await supabase.from('patient_policies').update(row).eq('id', policy.id).select().single();
+    if (error) throw error;
+    return rowToPolicy(data);
+  }
+  const { data, error } = await supabase.from('patient_policies').insert(row).select().single();
+  if (error) throw error;
+  return rowToPolicy(data);
+}
+
+export async function deletePatientPolicy(id) {
+  const { error } = await supabase.from('patient_policies').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────
+// CATÁLOGOS EXTENSIBLES ("Otra" → texto libre → se suma a las opciones)
+// Genérico por household + categoría — reutilizable para pólizas
+// (Pacientes), vía de administración (Medicamentos) y especialidad
+// (Médicos), en vez de una tabla de catálogo por módulo.
+// ─────────────────────────────────────────
+export async function listCatalogOptions(householdId, categoria) {
+  const { data, error } = await supabase.from('custom_catalog_options').select('*')
+    .eq('household_id', householdId).eq('categoria', categoria).order('valor');
+  if (error) throw error;
+  return data.map(r => r.valor);
+}
+
+export async function addCatalogOption(householdId, categoria, valor) {
+  const v = (valor || '').trim();
+  if (!v) return null;
+  const { data, error } = await supabase.from('custom_catalog_options')
+    .upsert({ household_id: householdId, categoria, valor: v }, { onConflict: 'household_id,categoria,valor', ignoreDuplicates: true })
+    .select().maybeSingle();
+  if (error) throw error;
+  return v;
 }
 
 // ─────────────────────────────────────────

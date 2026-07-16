@@ -577,8 +577,19 @@ body.light-mode .dpb-chip { background: var(--hover); }
 
 .vital-form-section { margin-bottom:18px; }
 .vital-form-section:last-child { margin-bottom:0; }
-.vital-form-section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--ts); margin-bottom:10px; padding-bottom:7px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:7px; }
-.vital-form-section-title svg { width:13px; height:13px; }
+.form-section-title, .vital-form-section-title { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--ts); margin:18px 0 10px; padding-bottom:7px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:7px; }
+.form-section-title svg, .vital-form-section-title svg { width:13px; height:13px; }
+
+/* Pólizas de seguro adicionales (ficha de paciente) */
+.policy-item { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:9px 12px; margin-bottom:8px; }
+.policy-info { flex:1; min-width:0; }
+.policy-tipo { font-size:13px; font-weight:600; }
+.policy-num { font-size:11.5px; color:var(--ts); margin-top:2px; }
+.policy-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+
+/* Utilidad para ocultar campos condicionales dentro del modal genérico
+   (p. ej. el campo "Especificar tipo" del selector "Otra…"). */
+#modal-body .hidden { display:none; }
 
 /* ══ VITALS ══ */
 .vitals-kpi { display:grid; grid-template-columns:repeat(auto-fill,minmax(148px,1fr)); gap:11px; }
