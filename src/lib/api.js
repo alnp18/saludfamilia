@@ -368,10 +368,16 @@ export async function deleteOrder(id) {
 // ─────────────────────────────────────────
 // MEDICATIONS (con versionado)
 // ─────────────────────────────────────────
+/** Compatibilidad: horarios viejos (import .sfam anterior a P1.5, o migración
+ * 0010 sobre datos que no hayan pasado por ella) venían como texto plano
+ * ("08:00"). Se normalizan a {hora, dosis} — dosis vacía, no existía antes. */
+function normalizeHorarios(horarios) {
+  return (horarios || []).map(h => typeof h === 'string' ? { hora: h, dosis: '' } : h);
+}
 function rowToMed(r) {
   return {
     id: r.id, patientId: r.patient_id, nombre: r.nombre, dosis: r.dosis,
-    unidad: r.unidad, frecuencia: r.frecuencia, horarios: r.horarios || [],
+    unidad: r.unidad, frecuencia: r.frecuencia, horarios: normalizeHorarios(r.horarios),
     via: r.via, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin,
     observaciones: r.observaciones, activo: r.activo, version: r.version,
     medicamentoPadreId: r.medicamento_padre_id, motivoCambio: r.motivo_cambio,

@@ -590,6 +590,11 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .horarios-builder { display:flex; flex-direction:column; gap:6px; }
 .horarios-builder-row { display:flex; gap:6px; align-items:center; }
 .horarios-builder-row input { flex:1; }
+.horarios-builder-row input[type="time"] { flex:0 0 120px; }
+.horarios-builder-head { display:flex; gap:6px; padding:0 0 2px; }
+.horarios-builder-head span { flex:1; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--ts); }
+.horarios-builder-head span:first-child { flex:0 0 120px; }
+.horarios-builder-empty-msg { font-size:12px; color:var(--ts); margin:2px 0 4px; }
 .add-horario-btn { background:none; border:none; cursor:pointer; color:var(--t-primary-lt); font-family:inherit; font-size:12.5px; font-weight:500; display:flex; align-items:center; gap:5px; padding:5px 0; }
 .add-horario-btn svg { width:12px; height:12px; }
 
