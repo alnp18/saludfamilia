@@ -12,7 +12,10 @@ export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
 // vía la opción "Otra…", que queda disponible para cargas futuras.
 const POLICY_TYPES_FIJOS = ['SOAT', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'Vida', 'Dental'];
 const CATEGORIA_POLIZA = 'poliza_tipo';
-const PARENTESCO_OPTIONS = ['Madre/Padre', 'Hermano/Hermana', 'Abuela/Abuelo', 'Tío/Tía', 'Familiar', 'Representante asignado'];
+const PARENTESCO_OPTIONS = [
+  'Madre/Padre', 'Hijo/Hija', 'Hermano/Hermana', 'Abuela/Abuelo', 'Nieto/Nieta',
+  'Tío/Tía', 'Sobrino/Sobrina', 'Cuidador', 'Familiar', 'Representante asignado', 'Otro',
+];
 
 // Estado del sub-formulario "Agregar póliza" dentro del modal de ficha de
 // paciente. Es un solo modal (ver modal.js), así que este mini-formulario
