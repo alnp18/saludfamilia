@@ -3,6 +3,7 @@ import * as api from './lib/api.js';
 import { state, restoreActivePatientId, persistActivePatientId, restoreLightMode, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
 import { initModalOverlay, showToast } from './lib/modal.js';
 import { wireHeader, closePatientDrop, closeMobileNav } from './modules/header.js';
+import { showLegalModal } from './lib/legal.js';
 
 import * as Dashboard from './modules/dashboard.js';
 import * as Patients from './modules/patients.js';
@@ -220,6 +221,8 @@ function wireAuthScreen() {
   document.getElementById('auth-forgot-btn').addEventListener('click', () => {
     setAuthMode('recover');
   });
+
+  document.getElementById('auth-legal-btn').addEventListener('click', showLegalModal);
 
   document.getElementById('auth-form').addEventListener('submit', async (e) => {
     e.preventDefault();

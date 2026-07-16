@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as xport from '../lib/exportImport.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
+import { showLegalModal } from '../lib/legal.js';
 import { esc, avatarColor, fmtDate } from '../lib/utils.js';
 
 /**
@@ -85,6 +86,15 @@ export async function render() {
         </div>
       </div>
     </div>
+    <div class="card">
+      <div class="card-hd"><h2>Aviso médico y de privacidad</h2></div>
+      <div class="fam-join">
+        <p class="fam-join-help">Qué información se guarda, dónde vive y qué no reemplaza esta app.</p>
+        <div class="fam-join-row">
+          <button class="btn" id="btn-view-legal">Ver aviso</button>
+        </div>
+      </div>
+    </div>
   `;
 
   el.querySelectorAll('[data-remove-id]').forEach(b =>
@@ -97,6 +107,7 @@ export async function render() {
   });
   document.getElementById('btn-export-info').addEventListener('click', openExportModal);
   document.getElementById('btn-import-info').addEventListener('click', openImportModal);
+  document.getElementById('btn-view-legal').addEventListener('click', showLegalModal);
 
   if (isOwner) await renderInvites(members);
 }

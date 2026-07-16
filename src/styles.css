@@ -320,6 +320,33 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 .modal-close svg { width: 14px; height: 14px; }
 .modal-ft { padding: 13px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
 
+/* ══ AVISO MÉDICO Y DE PRIVACIDAD ══
+   Overlay propio (no reutiliza #overlay/#modal): se abre tanto desde la
+   pantalla de login (#auth-screen, z-index 1000) como desde dentro de la
+   app ya autenticada, así que necesita quedar por encima de ambos
+   contextos sin depender de cuál esté visible en ese momento. */
+.legal-overlay {
+  position: fixed; inset: 0; z-index: 1200;
+  background: rgba(0,0,0,.72); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.legal-card {
+  width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto;
+  background: var(--card); border: 1px solid var(--border-lt);
+  border-radius: 14px; box-shadow: 0 32px 80px rgba(0,0,0,.65);
+}
+.legal-hd {
+  padding: 18px 22px 14px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 12px; position: sticky; top: 0;
+  background: var(--card);
+}
+.legal-hd h2 { font-size: 15px; font-weight: 700; }
+.legal-hd .modal-close { margin-left: auto; }
+.legal-body { padding: 18px 22px; display: flex; flex-direction: column; gap: 14px; font-size: 13.5px; line-height: 1.6; color: var(--ts); }
+.legal-body strong { color: var(--tp); }
+.legal-fineprint { font-size: 12px; color: var(--tm); }
+.legal-ft { padding: 13px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+
 /* ══ VISOR DE ADJUNTOS (imágenes/PDF) ══
    Ventana sobrepuesta propia, NUNCA una pestaña nueva — ver src/lib/viewer.js.
    z-index 950: por encima del modal genérico (500, puede seguir abierto
@@ -755,6 +782,12 @@ body.patient-themed:not(.light-mode) { color-scheme: dark; }
 .auth-switch button { background:none; border:none; color: var(--t-primary-lt); cursor:pointer; font-family: inherit; font-size: inherit; padding: 0; }
 .auth-forgot { text-align: right; margin-top: -4px; }
 .auth-forgot button { background:none; border:none; color: var(--t-primary-lt); cursor:pointer; font-family: inherit; font-size: 12px; padding: 0; }
+.auth-legal-link {
+  display: block; width: 100%; margin-top: 14px; background: none; border: none;
+  color: var(--tm); cursor: pointer; font-family: inherit; font-size: 11.5px;
+  text-align: center; text-decoration: underline; padding: 0;
+}
+.auth-legal-link:hover { color: var(--ts); }
 #auth-screen .hidden { display: none; }
 .pw-wrap { position: relative; }
 .pw-wrap .fi { padding-right: 42px; }
