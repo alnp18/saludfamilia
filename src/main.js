@@ -227,8 +227,8 @@ function wireAuthScreen() {
     errEl.classList.remove('show');
 
     if (authMode === 'reset') {
-      if (password.length < 6) {
-        errEl.textContent = 'La contraseña debe tener al menos 6 caracteres.';
+      if (password.length < 8) {
+        errEl.textContent = 'La contraseña debe tener al menos 8 caracteres.';
         errEl.classList.add('show');
         return;
       }
