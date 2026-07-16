@@ -1,6 +1,7 @@
 # SaludFamilia — Contexto del proyecto
 
-_Última actualización: 2026-07-16 (invitaciones + exportar/importar + Storage + auditoría RLS)_
+_Última actualización: 2026-07-16 (P1.5 — Órdenes médicas, Medicamentos,
+Médicos e imágenes/documentos transversal)_
 
 ## Qué es
 
@@ -35,8 +36,13 @@ recomendado en `docs/Plan_de_Avance_MVP.docx`:
    hubo datos que mover). Pendiente su E2E por UI en producción.
 6. ✅ Auditoría de seguridad RLS pre-lanzamiento (P1 #8) — **COMPLETADA**
    el 2026-07-16 (migraciones 0007 y 0008). Detalle abajo.
-7. Una tanda extensa de ajustes de interfaz, ya relevada y lista para
-   ejecutar módulo por módulo (P1.5, Sonnet) — el frente grande restante.
+7. Ajustes de interfaz (P1.5, Sonnet) — **la mayoría COMPLETADA** el
+   2026-07-16: tema visual, Ficha de paciente, Órdenes médicas,
+   Medicamentos, Médicos, y el cambio transversal de imágenes/documentos
+   (foto→PDF + captura por cámara). Detalle en la sección dedicada abajo.
+   Quedan pendientes de esa tanda: el componente de ampliar/descargar
+   imágenes (lightbox), P2, y migrar Pólizas (Pacientes) al helper
+   compartido de catálogo extensible.
 8. Pieza A de arquitectura (directorio público auditado de médicos y
    centros), diseñada a alto nivel pero sin implementar (Fable).
 
@@ -53,15 +59,22 @@ saludfamilia/
 │       ├── 0005_household_invitations.sql   ← invitaciones + canje + bajas
 │       ├── 0006_storage_adjuntos.sql        ← bucket privado + políticas
 │       ├── 0007_auditoria_rls_hardening.sql ← FKs compuestas, schema private…
-│       └── 0008_indices_fks_compuestas.sql
+│       ├── 0008_indices_fks_compuestas.sql
+│       ├── 0009_ficha_paciente_edicion.sql   ← nombre en 4 campos, dirección,
+│       │                                       contacto emergencia, pólizas
+│       ├── 0010_medicamentos_horarios_frecuencia.sql ← horarios jsonb {hora,dosis}
+│       └── 0011_medicos_tarjeta_profesional.sql
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
 │   │   ├── auth.js            ← signUp/signIn/signOut + ensureHousehold()
 │   │   │                        + requestPasswordReset/updatePassword
 │   │   ├── api.js              ← + sección FAMILIA (miembros/invitaciones)
-│   │   ├── files.js            ← adjuntos en Storage (subir/firmar/borrar)
+│   │   ├── files.js            ← adjuntos en Storage (subir/firmar/borrar) +
+│   │   │                          processUploadFile() (validación + foto→PDF)
 │   │   ├── exportImport.js     ← exportar/importar cifrado (.sfam)
+│   │   ├── extensibleCatalog.js ← patrón "Otra…" compartido (Medicamentos,
+│   │   │                           Médicos; Pólizas aún con su propia copia)
 │   │   ├── theme.js            ← ThemeEngine: paleta determinista por paciente
 │   │   ├── icons.js
 │   │   ├── modal.js
@@ -75,10 +88,13 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, 8 migraciones aplicadas. Plan gratuito — "Leaked
-  password protection" NO se puede activar (requiere Pro); el mínimo de
-  contraseña se subió a 8 caracteres en Auth (2026-07-16). PostgreSQL 17.
-  Bucket privado de Storage `adjuntos` (10MB máx., imágenes y PDF).
+  `ACTIVE_HEALTHY`, 11 migraciones aplicadas (las últimas, `0009`–`0011`,
+  del trabajo P1.5 de esta sesión). Plan gratuito — "Leaked password
+  protection" NO se puede activar (requiere Pro); el mínimo de contraseña
+  se subió a 8 caracteres en Auth (2026-07-16). PostgreSQL 17. Bucket
+  privado de Storage `adjuntos` (10MB máx., imágenes y PDF). Tabla de
+  catálogo compartida `custom_catalog_options` (household_id, categoria,
+  valor) para el patrón "Otra… extensible".
 - **Vercel**: proyecto `saludfamilia` (team `alnp`, id
   `team_upa18NsIqLYAoLBKzY61ioPk`). URL de producción:
   **https://saludfamilia.vercel.app** (alias también
@@ -103,34 +119,39 @@ saludfamilia/
 
 ## Estado de los datos (importante para el próximo agente)
 
-**La base de datos YA NO está vacía.** Tras la verificación E2E del
-2026-07-15 se conservaron deliberadamente datos de muestra. Conteo actual
-(tras los E2E de invitaciones y exportar/importar):
+**La base de datos YA NO está vacía.** Se conservaron deliberadamente los
+datos de prueba generados en los E2E, tanto los de P1 (2026-07-15) como
+los de la verificación de P1.5 hecha en producción esta sesión
+(Órdenes/Medicamentos/Médicos e imágenes→PDF). Conteo real verificado por
+SQL el 2026-07-16:
 
 - `auth.users`: **2**
   - `alnp.alnp@gmail.com` (id `c310a4a2-887d-47fe-840b-221c9deb746c`) —
-    cuenta del E2E, correo confirmado. Household "Mi familia"
-    (`f1196d77-f03f-40a7-b84c-36fc338cac36`), rol owner. Tiene el set
-    completo de datos de prueba (ver abajo).
+    household "Mi familia" (`f1196d77-f03f-40a7-b84c-36fc338cac36`), rol
+    owner. Concentra **todo** el set de datos de prueba (ver abajo),
+    incluidos los generados durante el E2E de P1.5.
   - `dacn.2026@gmail.com` (id `09c80114-1114-4932-966d-ddd6f3d66c60`) —
-    correo confirmado. Su household actual
-    (`2d3348a6-fe8c-4822-a87f-6024039da6bd`) fue creado automáticamente el
-    2026-07-16 al **salir** de la familia de alnp durante el E2E de
-    invitaciones (el anterior se eliminó al canjear el código). Vacío.
+    su household (`2d3348a6-fe8c-4822-a87f-6024039da6bd`) sigue **vacío**
+    (0 pacientes/órdenes/medicamentos/médicos/centros).
 - `households`: 2 · `household_members`: 2
-- `household_invitations`: quedan registros de los E2E — al menos una
-  invitación usada (auditoría de quién entró) y pendientes sin usar que
-  caducan a los 7 días de creadas.
-- Datos de `alnp.alnp` (todos marcados como "prueba E2E"):
-  - `patients`: 1 — "Prueba E2E Paciente" (1990-05-15, Masculino, O+,
+- Datos de `alnp.alnp` (todos "prueba E2E", crecieron durante la
+  verificación de P1.5 — ya no son solo 1 registro por tabla como en el
+  snapshot del 2026-07-15):
+  - `patients`: **1** — "Prueba E2E Paciente" (1990-05-15, Masculino, O+,
     EPS Prueba, afiliado TEST-000123).
-  - `medical_orders`: 1 — tipo Examen (etapa A + B/Solicitud completas;
-    C/Autorización y D/Cita vacías por falta de centros/médicos).
-  - `medications`: 1 — Metformina 850 mg, dos veces al día,
-    horarios `["08:00","20:00"]`, vía Oral.
-  - `vital_signs`: 1 — peso 70.5, altura 172, presión 120/80, temp 36.6,
-    sat 98, glucosa 90, FC 72, perímetros cintura/cadera/brazo 85/95/30.
-- `doctors`: 0 · `medical_centers`: 0 (directorios vacíos).
+  - `medical_orders`: **18** — generadas probando el nuevo flujo de
+    navegación por etapas con confirmación, el filtro por especialidad y
+    el alta rápida de médico/centro desde la orden.
+  - `medications`: **3** — probando el rediseño de Frecuencia/Horarios de
+    toma (dosis por horario, recálculo automático) y Vía de
+    administración extensible.
+  - `doctors`: **4** · `medical_centers`: **4** — creados vía alta rápida
+    desde Órdenes/Médicos durante el E2E (antes ambos directorios estaban
+    vacíos).
+  - `vital_signs`: **1** (sin cambios).
+  - `custom_catalog_options`: **2** — `especialidad = "Endocrinologia"` y
+    `via_administracion = "Grandes Pliegues"`, cargadas probando el
+    patrón "Otra… extensible" en Médicos y Medicamentos.
 
 **Consecuencia práctica**: si se necesita un E2E limpio de nuevo, o bien
 usar un tercer correo, o limpiar estos datos primero. El esquema, funciones,
@@ -326,6 +347,90 @@ bloqueando referencias ajenas, created_by inmutable, escalada de rol
 bloqueada, anon sin acceso, canje intacto, y regresión de los flujos
 normales incluido el camino del bug 403 histórico.
 
+## Prioridad P1.5 — Edición de interfaz (sesión 2026-07-16)
+
+Tanda de ajustes de interfaz relevada en `docs/Plan_de_Avance_MVP.docx`.
+**Completada casi en su totalidad esta sesión**, módulo por módulo, todo
+verificado E2E en producción salvo donde se indica lo contrario.
+
+- **Tema visual** (commit `4df95ff`): un solo control de modo claro/oscuro
+  en el header, independiente de `ThemeEngine` (paleta por paciente).
+  Eliminado el botón redundante de la tarjeta del paciente.
+- **Ficha de paciente** (commit `2c9103c` + `986ff77`): nombre en 4 campos
+  (primer/segundo nombre, primer/segundo apellido), dirección de
+  residencia, contacto de emergencia estructurado (incluye parentesco
+  desplegable, ampliado luego con más opciones), y pólizas de seguro
+  adicionales (uno-a-muchos, tabla `patient_policies`, con "Otra" propio
+  — ver nota de `extensibleCatalog.js` abajo). Migración `0009`.
+- **Órdenes médicas** (commit `943dbd6`): vista de solo lectura por
+  defecto al expandir una orden; navegación por etapas con alerta de
+  confirmación antes de editar una etapa anterior a la actual; filtro
+  combinado por etapa y especialidad; alta rápida de médico/centro médico
+  sin salir del flujo; sección "Historia clínica" (antes "Archivo PDF de
+  la orden") acepta subir fotos directamente. **Verificado E2E en
+  producción por el usuario** ("Verifique E2E, todo ok en ordenes").
+- **Medicamentos** (commit `41c4211`): campo "Dosis" → "Dosis diaria";
+  Frecuencia reemplazada por las 5 opciones fijas del plan (Una vez al
+  día · Dos veces al día o cada 12h · Tres veces al día o cada 8h ·
+  Cuatro veces al día o cada 6h · A demanda); nueva sección "Horarios de
+  toma" con dos columnas (hora + dosis de ese horario), filas
+  auto-generadas según la frecuencia, primer horario editable y los
+  siguientes recalculados automáticamente al cambiarlo — **decisión
+  explícita del usuario: cambiar el horario base siempre recalcula todos
+  los siguientes**, incluso sobre ediciones manuales previas (no cambiar
+  esto sin volver a confirmar con el usuario). Vía de administración
+  ahora incluye "Vía sonda" fija y "Otra" extensible. Migración `0010`
+  (conversión de `horarios` de `text[]` a `jsonb`, remapeo conservador de
+  frecuencias viejas — solo se reinterpretan los valores con equivalencia
+  clara; el resto queda intacto para revisión humana).
+- **Médicos** (commit `97c2115`): Especialidad con "Otra" extensible;
+  nuevo campo "Número de tarjeta profesional" debajo del nombre.
+  Migración `0011`.
+- **Patrón "Otra… extensible" — helper compartido** (`src/lib/
+  extensibleCatalog.js`, nuevo): un único módulo (`catalogOptionsHtml`,
+  `resolveCatalogValue`, constante `OTRA_VALUE`) reutilizado por
+  Medicamentos (Vía de administración) y Médicos (Especialidad), en vez
+  de reimplementar el patrón en cada módulo. **Pendiente (opcional, no
+  bloqueante)**: Pólizas (Ficha de paciente) sigue con su propia
+  implementación inline, previa a este helper — migrarla es limpieza de
+  código, no un bug.
+- **Cambio transversal — imágenes y documentos** (commit `d420668`):
+  - Opción de tomar la foto directamente desde el navegador (`<input
+    capture="environment">`) junto a cada campo de subir archivo, en las
+    tres secciones de Órdenes y en Pólizas (Pacientes).
+  - Toda foto subida o tomada (no solo en Órdenes) se convierte
+    automáticamente a PDF de una sola página antes de guardarse
+    (`files.processUploadFile()`), para no acumular adjuntos pesados. Un
+    PDF subido directamente pasa sin tocar.
+  - **Pendiente del ítem original del plan**: el lightbox/modal para
+    ampliar cualquier imagen o documento con un botón de descarga
+    (componente reutilizable único) **no se implementó** todavía — lo
+    que se hizo esta sesión fue la captura por cámara y la conversión a
+    PDF, que son un pedido distinto y posterior del usuario.
+- **Bug de producción encontrado y corregido** (commit `fb4e042`,
+  **relevante para cualquier trabajo futuro sobre adjuntos**): al guardar
+  una orden con una foto recién convertida a PDF, Supabase Storage
+  rechazaba la subida con "mime type application/octet-stream is not
+  supported". Causa raíz: `dataUrlToBlob()` en `src/lib/files.js`
+  parseaba el header de la data-URL con una regex que exigía
+  `;base64` pegado al mime type (`^data:([^;]+);base64`), pero el
+  `datauristring` real que produce jsPDF trae un parámetro intermedio
+  (`data:application/pdf;filename=x.pdf;base64,...`) — la regex no
+  matcheaba, el Blob quedaba tipado `application/octet-stream`, y
+  `@supabase/storage-js` usa el `.type` real del Blob al subir (**ignora
+  la opción `contentType`** cuando el payload es un Blob, confirmado
+  leyendo su fuente). Fix: regex cambiada a `^data:([^;,]+)` (toma todo
+  antes del primer `;` o `,`). Afectaba a **toda** conversión foto→PDF
+  desde que se introdujo con Órdenes médicas — verificado con Playwright
+  contra el formato real de jsPDF, no con un mock.
+- Un segundo error reportado por el usuario tras el fix ("Failed to load
+  module script… MIME type text/html") **no era un bug de código**: es
+  el patrón clásico de chunk de Vite con nombre hasheado + rewrite SPA de
+  Vercel — una pestaña con el `index.html` viejo intenta importar un
+  chunk que ya no existe tras el deploy nuevo, y el rewrite catch-all
+  devuelve HTML en vez de 404. Resuelto por el usuario con un hard
+  refresh; sin cambio de código.
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -352,8 +457,11 @@ normales incluido el camino del bug 403 histórico.
 9. **P1 #7 — Adjuntos en Storage: COMPLETADA** el 2026-07-15 (E2E por UI
    pendiente) y **P1 #8 — Auditoría RLS: COMPLETADA** el 2026-07-16 (ver
    secciones dedicadas arriba).
-10. **Relevamiento extenso de UI/UX** en `docs/Plan_de_Avance_MVP.docx`
-    (sección P1.5), módulo por módulo.
+10. **P1.5 — Edición de interfaz: COMPLETADA casi en su totalidad** el
+    2026-07-16 (tema visual, Ficha de paciente, Órdenes médicas,
+    Medicamentos, Médicos, imágenes/documentos transversal), con un bug
+    crítico de producción encontrado y corregido en el camino (ver
+    sección dedicada arriba).
 11. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
     directorio público auditado de médicos y centros.
 
@@ -372,20 +480,30 @@ normales incluido el camino del bug 403 histórico.
 
 ## Próximos pasos sugeridos para quien retome
 
-1. E2E corto de adjuntos en producción: subir un PDF/foto a una orden,
-   verlo con el clic en el nombre, reemplazarlo y eliminar la orden
-   (verifica la limpieza del bucket).
-2. La tanda de UI (P1.5, Sonnet) es el frente más "listo para ejecutar":
-   empezar por el patrón transversal 'Otra extensible' y el de imágenes
-   ampliables/descargables, que se repiten en varios módulos.
-3. Antes de tocar cualquier política RLS nueva, reproducir el error primero
+1. **Lightbox/descarga de imágenes y documentos** (ítem transversal del
+   plan P1.5 aún no implementado): componente único reutilizable para
+   ampliar y descargar cualquier adjunto, en vez de repetirlo por módulo.
+2. E2E corto de adjuntos "clásico" en producción si no se ha hecho desde
+   el cambio de imágenes/documentos: subir, ver, reemplazar y eliminar
+   (verifica la limpieza del bucket) en los módulos que aún no se
+   probaron explícitamente con el nuevo flujo (Pólizas en Pacientes).
+3. Opcional, limpieza de código (no bloqueante): migrar Pólizas (Ficha de
+   paciente) para usar `src/lib/extensibleCatalog.js` en vez de su
+   implementación inline propia del mismo patrón "Otra".
+4. Sección P2 del plan (responsive móvil, eliminar `SaludFamilia.html`
+   legacy, estados vacíos/errores consistentes, aviso de privacidad).
+5. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
    una transacción con `rollback` (patrón usado con éxito en todos los
    E2E de seguridad de este proyecto). Ojo: `is_household_member` ahora
    vive en el schema `private`, y Supabase bloquea DELETEs directos sobre
    `storage.objects` (usar la API de Storage).
-4. Decidir qué hacer con los datos de prueba conservados (dejarlos como
-   muestra o limpiarlos antes del lanzamiento real).
+6. Decidir qué hacer con los datos de prueba conservados, que ya
+   incluyen bastante volumen de E2E de P1.5 (18 órdenes, 3 medicamentos,
+   4 médicos, 4 centros médicos) — dejarlos como muestra o limpiarlos
+   antes del lanzamiento real.
+7. Pieza A de arquitectura (directorio público auditado) — diseño
+   detallado con Fable cuando se decida priorizarla.
 
 Ver el plan de avance detallado y priorizado en
 `docs/Plan_de_Avance_MVP.docx`.
