@@ -97,15 +97,22 @@ function describeTheme(hue, sat) {
   return `${colorName} ${intensity}`;
 }
 
-/** Genera la especificación de tema para un paciente. Determinista: mismo id → mismo tema. */
-export function generate(paciente) {
+/**
+ * Genera la especificación de tema para un paciente. Determinista: mismo id →
+ * mismo tema (matiz, saturación, etc. dependen solo del paciente).
+ *
+ * `lightMode` es la preferencia general de claro/oscuro del usuario (nunca del
+ * paciente) y solo se usa aquí para calibrar el contraste del texto contra el
+ * fondo claro u oscuro sobre el que se va a renderizar la paleta.
+ */
+export function generate(paciente, lightMode = false) {
   if (!paciente) return null;
 
   const id = paciente.id || 'default';
   const sexo = paciente.sexo || '';
   const dob = paciente.fechaNacimiento || '';
   const age = calcAgeDecimal(dob);
-  const mode = paciente._lightMode ? 'day' : 'night';
+  const mode = lightMode ? 'day' : 'night';
 
   const hash = fnv1a(id);
 
@@ -200,7 +207,9 @@ export function apply(spec, lightMode = false) {
   root.style.setProperty('--t-shadow', spec['--theme-shadow']);
   root.style.setProperty('--t-border', spec['--theme-border']);
 
-  document.body.classList.toggle('light-mode', lightMode);
+  // El modo claro/oscuro general de la interfaz (clase body.light-mode) lo
+  // controla exclusivamente el botón del header — ThemeEngine solo pinta la
+  // paleta de color del paciente sobre el fondo que ya esté activo.
   document.body.classList.add('patient-themed');
 
   if (!lightMode) {
@@ -230,7 +239,9 @@ export function reset() {
     '--t-accent', '--t-accent-lt', '--t-accent-dim', '--t-gradient', '--t-shadow', '--t-border',
     '--bg', '--surface', '--card', '--card2', '--hover', '--border', '--border-lt',
   ].forEach(k => root.style.removeProperty(k));
-  document.body.classList.remove('patient-themed', 'light-mode');
+  // No tocar body.light-mode: es la preferencia general del usuario y debe
+  // sobrevivir a que se quite el tema de un paciente (p. ej. al deseleccionarlo).
+  document.body.classList.remove('patient-themed');
 }
 
 export const ThemeEngine = { generate, apply, reset, hslToHex, fnv1a };

@@ -1,6 +1,6 @@
 import * as auth from './lib/auth.js';
 import * as api from './lib/api.js';
-import { state, restoreActivePatientId, persistActivePatientId, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
+import { state, restoreActivePatientId, persistActivePatientId, restoreLightMode, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
 import { initModalOverlay, showToast } from './lib/modal.js';
 import { wireHeader, closePatientDrop } from './modules/header.js';
 
@@ -58,6 +58,10 @@ async function bootstrapApp() {
   document.getElementById('auth-screen').style.display = 'none';
   document.getElementById('app-header').style.display = 'flex';
   document.getElementById('app-shell').style.display = 'flex';
+
+  // Preferencia general de claro/oscuro (independiente de cualquier paciente).
+  state.lightMode = restoreLightMode();
+  document.body.classList.toggle('light-mode', state.lightMode);
 
   initModalOverlay();
   wireHeader({ setActivePatient, goView });

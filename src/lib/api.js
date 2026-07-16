@@ -21,6 +21,10 @@ function rowToPatient(r) {
     numeroAfiliado: r.numero_afiliado,
     contactoEmergencia: r.contacto_emergencia,
     notas: r.notas,
+    // Columna legada: ya no se lee/escribe desde la UI (ver P1.5 — el modo
+    // claro/oscuro es ahora un único control general en el header, nunca una
+    // preferencia por paciente). Se mantiene el mapeo por compatibilidad con
+    // la columna existente en la base de datos.
     _lightMode: r.light_mode,
     creadoEn: r.created_at,
   };
@@ -36,7 +40,7 @@ function patientToRow(p, householdId) {
     numero_afiliado: p.numeroAfiliado || null,
     contacto_emergencia: p.contactoEmergencia || null,
     notas: p.notas || null,
-    light_mode: !!p._lightMode,
+    light_mode: false, // deprecado (ver P1.5); columna conservada por compatibilidad
   };
 }
 

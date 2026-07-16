@@ -1,5 +1,4 @@
-import { state } from '../state.js';
-import { ThemeEngine } from '../lib/theme.js';
+import { state, applyPatientTheme, persistLightMode } from '../state.js';
 import * as api from '../lib/api.js';
 import * as auth from '../lib/auth.js';
 import { esc, initials, avatarColor } from '../lib/utils.js';
@@ -13,7 +12,8 @@ export function wireHeader({ setActivePatient, goView }) {
   goViewCb = goView;
 
   document.getElementById('patient-selector').addEventListener('click', togglePatientDrop);
-  document.getElementById('theme-toggle-btn').addEventListener('click', toggleNightMode);
+  document.getElementById('theme-toggle-btn').addEventListener('click', toggleLightMode);
+  updateThemeToggleBtn(state.lightMode);
   document.getElementById('btn-logout').addEventListener('click', async () => {
     await auth.signOut();
     window.location.reload();
@@ -71,17 +71,19 @@ function updateThemeToggleBtn(isLight) {
   btn.innerHTML = isLight ? (moonSVG + ' Modo oscuro') : (sunSVG + ' Modo claro');
 }
 
-async function toggleNightMode() {
-  if (!state.activePatient) {
-    const isLight = document.body.classList.toggle('light-mode');
-    updateThemeToggleBtn(isLight);
-    return;
-  }
-  const updated = await api.savePatient({ ...state.activePatient, _lightMode: !state.activePatient._lightMode }, state.household.id);
-  state.activePatient = updated;
-  const spec = ThemeEngine.generate(updated);
-  ThemeEngine.apply(spec, !!updated._lightMode);
-  updateThemeToggleBtn(!!updated._lightMode);
+/**
+ * Único control de modo claro/oscuro de toda la app: es una preferencia
+ * general de accesibilidad/legibilidad, independiente de cualquier paciente.
+ * Nunca debe leer ni escribir datos del paciente activo — si hay uno, solo se
+ * le vuelve a aplicar su paleta (ThemeEngine) para que su fondo se adapte al
+ * modo recién elegido, pero el matiz/color que le asigna ThemeEngine no cambia.
+ */
+function toggleLightMode() {
+  state.lightMode = !state.lightMode;
+  persistLightMode(state.lightMode);
+  document.body.classList.toggle('light-mode', state.lightMode);
+  updateThemeToggleBtn(state.lightMode);
+  if (state.activePatient) applyPatientTheme(state.activePatient);
 }
 
 export { updateThemeToggleBtn };

@@ -42,7 +42,7 @@ export async function render() {
     const ac = avatarColor(p.nombre);
     const sel = state.activePatient?.id === p.id;
     const age = p.fechaNacimiento ? calcAge(p.fechaNacimiento) : null;
-    const pSpec = ThemeEngine.generate(p);
+    const pSpec = ThemeEngine.generate(p, state.lightMode);
     const pGrad = pSpec ? pSpec['--theme-gradient'] : 'var(--t-gradient)';
     return `<div class="patient-card ${sel ? 'selected' : ''}" data-select-id="${p.id}" style="--t-gradient:${pGrad}">
       <div class="pc-top">
@@ -61,9 +61,6 @@ export async function render() {
         </div>
       </div>
       ${sel ? `<span class="pc-tag"><svg width="10" height="10" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" d="M5 13l4 4L19 7"/></svg> Paciente activo</span>` : ''}
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-        ${sel ? `<button class="theme-night-btn ${p._lightMode ? 'active' : ''}" data-toggle-night="${p.id}">${p._lightMode ? 'Modo noche' : 'Modo día'}</button>` : ''}
-      </div>
       <div style="font-size:12px;color:var(--ts);display:flex;gap:12px;flex-wrap:wrap">
         ${p.eps ? `<span>${esc(p.eps)}</span>` : ''}
         ${p.numeroAfiliado ? `<span style="font-family:'JetBrains Mono',monospace">${esc(p.numeroAfiliado)}</span>` : ''}
@@ -73,7 +70,7 @@ export async function render() {
 
   grid.querySelectorAll('[data-select-id]').forEach(el => {
     el.addEventListener('click', async (e) => {
-      if (e.target.closest('[data-edit-id]') || e.target.closest('[data-delete-id]') || e.target.closest('[data-toggle-night]')) return;
+      if (e.target.closest('[data-edit-id]') || e.target.closest('[data-delete-id]')) return;
       const p = patients.find(x => x.id === el.dataset.selectId);
       if (p) await setActivePatientCb?.(p);
     });
@@ -82,15 +79,6 @@ export async function render() {
     el.addEventListener('click', (e) => { e.stopPropagation(); openPatientModal(el.dataset.editId); }));
   grid.querySelectorAll('[data-delete-id]').forEach(el =>
     el.addEventListener('click', (e) => { e.stopPropagation(); deletePatient(el.dataset.deleteId); }));
-  grid.querySelectorAll('[data-toggle-night]').forEach(el =>
-    el.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const p = patients.find(x => x.id === el.dataset.toggleNight);
-      if (!p) return;
-      const updated = await api.savePatient({ ...p, _lightMode: !p._lightMode }, state.household.id);
-      await setActivePatientCb?.(updated);
-      render();
-    }));
 }
 
 function openPatientModal(id) {
