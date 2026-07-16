@@ -3,6 +3,7 @@ import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc } from '../lib/utils.js';
 import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
+import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 
 const SP_COLORS_MAP = {
   'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
@@ -12,6 +13,11 @@ const SP_COLORS_MAP = {
 // Reutilizada por Órdenes (selector "Médico tratante") para el mini-formulario
 // de alta rápida de médico sin salir del asistente de la orden.
 export const SPECIALTIES = Object.keys(SP_COLORS_MAP);
+// Especialidad: fijas + "Otra…" extensible — tercer caso del mismo patrón
+// que Pólizas (Pacientes) y Vía de administración (Medicamentos), ver
+// nota transversal del plan (src/lib/extensibleCatalog.js).
+const CATEGORIA_ESPECIALIDAD = 'especialidad';
+let pendingEspOtra = false;
 
 export async function render() {
   const container = document.getElementById('view-doctors');
@@ -58,6 +64,7 @@ export async function render() {
           <div class="doc-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0112 0v2"/></svg></div>
           <div style="flex:1;min-width:0">
             <div class="doc-name">${esc(d.nombre)}</div>
+            ${d.tarjetaProfesional ? `<div class="doc-tarjeta">T.P. ${esc(d.tarjetaProfesional)}</div>` : ''}
             <div class="doc-detail">${d.consultorio ? esc(d.consultorio) + ' · ' : ''}${d.centroId ? esc(centerMap[d.centroId] || '') : ''}</div>
           </div>
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${d.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
@@ -72,33 +79,45 @@ export async function render() {
 }
 
 async function openDoctorModal(id) {
-  const centers = await api.listCenters(state.household.id);
+  const [centers, customEsp, d] = await Promise.all([
+    api.listCenters(state.household.id),
+    api.listCatalogOptions(state.household.id, CATEGORIA_ESPECIALIDAD),
+    id ? api.getDoctor(id) : Promise.resolve(null),
+  ]);
+  const knownEsp = [...SPECIALTIES, ...customEsp];
+  // Compatibilidad: especialidad guardada que no está ni en las fijas ni
+  // en el catálogo (dato viejo o importado) → se preselecciona "Otra…"
+  // con el valor ya escrito, en vez de perderlo silenciosamente.
+  pendingEspOtra = !!(d?.especialidad && !knownEsp.includes(d.especialidad));
+  const espSelected = pendingEspOtra ? OTRA_VALUE : (d?.especialidad || '');
+
   showModal(
     id ? 'Editar médico' : 'Nuevo médico',
     `<div class="form-body">
       <div class="form-row cols-2">
-        <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido"/></div>
+        <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido" value="${esc(d?.nombre || '')}"/></div>
+        <div class="form-field span2"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="df-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Especialidad</label>
-          <select class="fi" id="df-esp">
-            <option value="">Seleccionar…</option>
-            ${Object.keys(SP_COLORS_MAP).map(s => `<option>${s}</option>`).join('')}
-            <option value="Otra">Otra</option>
-          </select>
+          <select class="fi" id="df-esp"><option value="">Seleccionar…</option>${catalogOptionsHtml(SPECIALTIES, customEsp, espSelected)}</select>
+        </div>
+        <div class="form-field ${pendingEspOtra ? '' : 'hidden'}" id="df-esp-otra-field">
+          <label class="fl">Especificar especialidad</label>
+          <input class="fi" id="df-esp-otra" type="text" placeholder="Ej: Endocrinología" value="${esc(pendingEspOtra ? d.especialidad : '')}"/>
         </div>
         <div class="form-field">
           <label class="fl">Centro médico</label>
           <div style="display:flex;gap:6px">
             <select class="fi" id="df-centro" style="flex:1">
               <option value="">Sin centro asignado</option>
-              ${centers.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}
+              ${centers.map(c => `<option value="${c.id}" ${d?.centroId === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('')}
             </select>
             <button type="button" class="btn btn-sm btn-icon" id="df-centro-add-btn" title="Agregar centro médico al directorio">+</button>
           </div>
           <div id="df-centro-newform" class="hidden"></div>
         </div>
-        <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301"/></div>
-        <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="df-tel" type="tel" placeholder="Número directo o extensión"/></div>
-        <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="df-notas" rows="2" placeholder="Horarios, indicaciones especiales…"></textarea></div>
+        <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
+        <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="df-tel" type="tel" placeholder="Número directo o extensión" value="${esc(d?.tel || '')}"/></div>
+        <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="df-notas" rows="2" placeholder="Horarios, indicaciones especiales…">${esc(d?.notas || '')}</textarea></div>
       </div>
     </div>`,
     [
@@ -107,23 +126,26 @@ async function openDoctorModal(id) {
     ]
   );
   wireInlineNewCenter('df-centro', 'df-centro-add-btn', 'df-centro-newform');
-  if (id) api.getDoctor(id).then(d => {
-    document.getElementById('df-nombre').value = d.nombre || '';
-    document.getElementById('df-esp').value = d.especialidad || '';
-    document.getElementById('df-centro').value = d.centroId || '';
-    document.getElementById('df-consul').value = d.consultorio || '';
-    document.getElementById('df-tel').value = d.tel || '';
-    document.getElementById('df-notas').value = d.notas || '';
+  document.getElementById('df-esp').addEventListener('change', (e) => {
+    pendingEspOtra = e.target.value === OTRA_VALUE;
+    document.getElementById('df-esp-otra-field').classList.toggle('hidden', !pendingEspOtra);
   });
 }
 
 async function saveDoctorForm(editId) {
   const nombre = document.getElementById('df-nombre').value.trim();
   if (!nombre) { showToast('El nombre es obligatorio', 'err'); return; }
+  const espSel = document.getElementById('df-esp').value;
+  if (espSel === OTRA_VALUE && !document.getElementById('df-esp-otra').value.trim()) {
+    showToast('Escribe la especialidad', 'err'); return;
+  }
+  const especialidad = await resolveCatalogValue(state.household.id, CATEGORIA_ESPECIALIDAD, espSel, document.getElementById('df-esp-otra').value);
+
   const obj = {
     id: editId || undefined,
     nombre,
-    especialidad: document.getElementById('df-esp').value,
+    tarjetaProfesional: document.getElementById('df-tarjeta').value.trim(),
+    especialidad,
     centroId: document.getElementById('df-centro').value,
     consultorio: document.getElementById('df-consul').value.trim(),
     tel: document.getElementById('df-tel').value.trim(),

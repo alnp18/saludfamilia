@@ -241,6 +241,7 @@ function rowToDoctor(r) {
   return {
     id: r.id, nombre: r.nombre, especialidad: r.especialidad,
     centroId: r.centro_id, consultorio: r.consultorio, tel: r.telefono, notas: r.notas,
+    tarjetaProfesional: r.tarjeta_profesional,
   };
 }
 function doctorToRow(d, householdId) {
@@ -249,6 +250,7 @@ function doctorToRow(d, householdId) {
     nombre: d.nombre, especialidad: d.especialidad || null,
     centro_id: d.centroId || null, consultorio: d.consultorio || null,
     telefono: d.tel || null, notas: d.notas || null,
+    tarjeta_profesional: d.tarjetaProfesional || null,
   };
 }
 

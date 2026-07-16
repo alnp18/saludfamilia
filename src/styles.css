@@ -671,6 +671,7 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .doc-avatar { width:36px; height:36px; border-radius:9px; background:var(--t-primary-dim); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
 .doc-avatar svg { width:18px; height:18px; color:var(--t-primary-lt); }
 .doc-name   { font-size:13.5px; font-weight:600; }
+.doc-tarjeta { font-size:11px; color:var(--tm); font-family:'JetBrains Mono',monospace; margin-top:1px; }
 .doc-detail { font-size:11.5px; color:var(--ts); margin-top:2px; }
 
 body.patient-themed:not(.light-mode) { color-scheme: dark; }
