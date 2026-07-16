@@ -2,7 +2,7 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
-import { esc, fmtDate, today, daysFrom, readFileAsDataURL } from '../lib/utils.js';
+import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
 
@@ -258,30 +258,17 @@ async function openOrderModal(id) {
   }));
 }
 
+/** Cualquier foto (subida desde archivos o tomada con la cámara) se
+ * convierte automáticamente a PDF — cambio transversal P1.5, aplica a las
+ * 3 secciones (Historia clínica, Solicitud, Autorización), no solo a la
+ * primera. En memoria hasta guardar la orden: recién ahí se sube a Storage. */
 async function handleFileInput(inputEl, slot) {
   const file = inputEl.files[0];
   if (!file) return;
-  if (file.size > files.MAX_FILE_MB * 1024 * 1024) {
-    showToast(`Archivo muy grande (máx. ${files.MAX_FILE_MB}MB)`, 'err');
-    return;
-  }
-  let dataUrl = await readFileAsDataURL(file);
-  let name = file.name, type = file.type;
-
-  // Sección A ("Historia clínica"): si se sube una foto en vez de un PDF ya
-  // existente, se convierte automáticamente a PDF de una página.
-  if (slot === 'orden' && type.startsWith('image/')) {
-    try {
-      dataUrl = await files.imageToPdfDataUrl(dataUrl);
-      type = 'application/pdf';
-      name = name.replace(/\.[^.]+$/, '') + '.pdf';
-    } catch {
-      showToast('No se pudo convertir la foto a PDF; se subirá tal cual', 'warn');
-    }
-  }
-
-  // En memoria hasta guardar la orden: recién ahí se sube a Storage.
-  orderFiles[slot] = { name, type, data: dataUrl };
+  const processed = await files.processUploadFile(file);
+  inputEl.value = ''; // permite volver a elegir el mismo archivo (subir vs. cámara)
+  if (!processed) return; // ya se avisó (tamaño demasiado grande, etc.)
+  orderFiles[slot] = processed;
   renderFilePreview(slot);
 }
 
@@ -307,6 +294,32 @@ function renderFilePreview(slot) {
     files.openAttachment(orderFiles[slot]).catch(err =>
       showToast(err.message || 'No se pudo abrir el archivo', 'err')));
   el.querySelector('[data-remove-slot]')?.addEventListener('click', () => { orderFiles[slot] = null; renderFilePreview(slot); });
+}
+
+const CAMERA_ICON = '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
+
+/** HTML de un campo de adjunto: subir archivo o tomar foto con la cámara
+ * del dispositivo (accept + capture="environment" — abre la cámara
+ * directamente en el navegador móvil). Ambas rutas pasan por
+ * handleFileInput, que convierte cualquier foto a PDF automáticamente. */
+function fileFieldHtml(slot, dropText, acceptUpload) {
+  return `
+    <div class="file-drop-row">
+      <div class="file-drop" id="drop-${slot}">${dropText}</div>
+      <button type="button" class="btn btn-sm btn-icon" id="cam-btn-${slot}" title="Tomar foto">${CAMERA_ICON}</button>
+    </div>
+    <input type="file" id="file-${slot}" accept="${acceptUpload}" style="display:none"/>
+    <input type="file" id="cam-${slot}" accept="image/*" capture="environment" style="display:none"/>
+    <div id="fp-${slot}"></div>`;
+}
+
+/** Conecta ambos disparadores (dropzone → subir archivo; botón cámara →
+ * tomar foto) de un campo de adjunto con handleFileInput. */
+function wireFileSlot(slot) {
+  document.getElementById(`drop-${slot}`).addEventListener('click', () => document.getElementById(`file-${slot}`).click());
+  document.getElementById(`file-${slot}`).addEventListener('change', function () { handleFileInput(this, slot); });
+  document.getElementById(`cam-btn-${slot}`).addEventListener('click', () => document.getElementById(`cam-${slot}`).click());
+  document.getElementById(`cam-${slot}`).addEventListener('change', function () { handleFileInput(this, slot); });
 }
 
 /** Abre el asistente de edición. `id` ausente = orden nueva (sin
@@ -357,9 +370,7 @@ async function openOrderWizard(id, prefill) {
         <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccionar…</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
         <div class="form-field span2"><label class="fl">Historia clínica</label>
-          <div class="file-drop" id="drop-orden">Haz clic para subir la historia clínica (PDF o foto — se convierte a PDF automáticamente)</div>
-          <input type="file" id="of-file" accept=".pdf,image/*" style="display:none"/>
-          <div id="fp-orden"></div>
+          ${fileFieldHtml('orden', 'Haz clic para subir la historia clínica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
         </div>
       </div>
     </div>
@@ -370,9 +381,7 @@ async function openOrderWizard(id, prefill) {
         <div class="form-field"><label class="fl">Hora</label><input class="fi" id="of-sol-hora" type="time"/></div>
         <div class="form-field span2"><label class="fl">Número de solicitud</label><input class="fi" id="of-sol-num" type="text" placeholder="SOL-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
         <div class="form-field span2"><label class="fl">Imagen o captura de pantalla</label>
-          <div class="file-drop" id="drop-solicitud">Haz clic para subir imagen</div>
-          <input type="file" id="of-sol-file" accept="image/*" style="display:none"/>
-          <div id="fp-solicitud"></div>
+          ${fileFieldHtml('solicitud', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
         </div>
       </div>
     </div>
@@ -390,9 +399,7 @@ async function openOrderWizard(id, prefill) {
           <div id="of-centro-newform" class="hidden"></div>
         </div>
         <div class="form-field span2"><label class="fl">Imagen de la autorización</label>
-          <div class="file-drop" id="drop-autorizacion">Haz clic para subir imagen</div>
-          <input type="file" id="of-auth-file" accept="image/*" style="display:none"/>
-          <div id="fp-autorizacion"></div>
+          ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
         </div>
       </div>
     </div>
@@ -428,12 +435,9 @@ async function openOrderWizard(id, prefill) {
   setModalMaxWidth('680px');
 
   document.querySelectorAll('.wiz-tab').forEach(t => t.addEventListener('click', () => switchWizTab(t.dataset.t)));
-  document.getElementById('drop-orden').addEventListener('click', () => document.getElementById('of-file').click());
-  document.getElementById('of-file').addEventListener('change', function () { handleFileInput(this, 'orden'); });
-  document.getElementById('drop-solicitud').addEventListener('click', () => document.getElementById('of-sol-file').click());
-  document.getElementById('of-sol-file').addEventListener('change', function () { handleFileInput(this, 'solicitud'); });
-  document.getElementById('drop-autorizacion').addEventListener('click', () => document.getElementById('of-auth-file').click());
-  document.getElementById('of-auth-file').addEventListener('change', function () { handleFileInput(this, 'autorizacion'); });
+  wireFileSlot('orden');
+  wireFileSlot('solicitud');
+  wireFileSlot('autorizacion');
 
   wireInlineNewDoctor({ primarySelectId: 'of-medico', otherSelectIds: ['of-cita-medico'], addBtnId: 'of-medico-add-btn', formContainerId: 'of-medico-newform', specialties: SPECIALTIES });
   wireInlineNewDoctor({ primarySelectId: 'of-cita-medico', otherSelectIds: ['of-medico'], addBtnId: 'of-cita-medico-add-btn', formContainerId: 'of-cita-medico-newform', specialties: SPECIALTIES });

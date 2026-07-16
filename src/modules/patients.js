@@ -3,7 +3,7 @@ import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
-import { esc, initials, avatarColor, calcAge, readFileAsDataURL } from '../lib/utils.js';
+import { esc, initials, avatarColor, calcAge } from '../lib/utils.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -313,7 +313,11 @@ async function renderPoliciesSection(patientId) {
         </div>
         <div class="form-field">
           <label class="fl">Foto o PDF del carnet</label>
-          <input class="fi" id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"/>
+          <div style="display:flex;gap:6px">
+            <input class="fi" id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="flex:1"/>
+            <button type="button" class="btn btn-sm btn-icon" id="pf-policy-imagen-cam-btn" title="Tomar foto"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+          </div>
+          <input type="file" id="pf-policy-imagen-cam" accept="image/*" capture="environment" style="display:none"/>
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
@@ -343,16 +347,19 @@ async function renderPoliciesSection(patientId) {
       pendingPolicyImage = null;
       renderPoliciesSection(patientId);
     });
-    document.getElementById('pf-policy-imagen').addEventListener('change', async (e) => {
+    // Subir archivo o tomar foto con la cámara — ambas rutas pasan por
+    // processUploadFile, que convierte cualquier foto a PDF automáticamente
+    // (cambio transversal P1.5) para no acumular carnets pesados.
+    const handlePolicyFileChange = async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      if (file.size > files.MAX_FILE_MB * 1024 * 1024) {
-        showToast(`Archivo muy grande (máx. ${files.MAX_FILE_MB}MB)`, 'err');
-        e.target.value = '';
-        return;
-      }
-      pendingPolicyImage = { name: file.name, type: file.type, data: await readFileAsDataURL(file) };
-    });
+      const processed = await files.processUploadFile(file);
+      e.target.value = '';
+      if (processed) pendingPolicyImage = processed;
+    };
+    document.getElementById('pf-policy-imagen').addEventListener('change', handlePolicyFileChange);
+    document.getElementById('pf-policy-imagen-cam').addEventListener('change', handlePolicyFileChange);
+    document.getElementById('pf-policy-imagen-cam-btn').addEventListener('click', () => document.getElementById('pf-policy-imagen-cam').click());
   } else {
     document.getElementById('pf-policy-add-btn').addEventListener('click', () => {
       policyFormOpen = true;

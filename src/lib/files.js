@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient.js';
+import { showToast } from './modal.js';
 
 /**
  * Adjuntos en Supabase Storage (bucket privado "adjuntos").
@@ -126,6 +127,35 @@ export async function imageToPdfDataUrl(dataUrl) {
   const format = (/^data:image\/(\w+);/.exec(dataUrl)?.[1] || 'jpeg').toUpperCase();
   doc.addImage(dataUrl, format === 'JPG' ? 'JPEG' : format, x, y, w, h);
   return doc.output('datauristring');
+}
+
+/**
+ * Procesa un archivo recién elegido para CUALQUIER campo de adjunto de la
+ * app (subido desde archivos o tomado con la cámara — ver <input capture>
+ * en cada formulario) — cambio transversal P1.5: toda foto se guarda como
+ * PDF, nunca como imagen suelta, para no acumular adjuntos pesados. Valida
+ * el tamaño máximo y, si es una imagen, la convierte con imageToPdfDataUrl.
+ * Un PDF subido directamente pasa sin tocar. Devuelve {name, type, data}
+ * listo para subir a Storage al guardar el formulario, o null si el
+ * archivo no es válido (ya se avisó con un toast).
+ */
+export async function processUploadFile(file) {
+  if (file.size > MAX_FILE_MB * 1024 * 1024) {
+    showToast(`Archivo muy grande (máx. ${MAX_FILE_MB}MB)`, 'err');
+    return null;
+  }
+  let dataUrl = await blobToDataUrl(file);
+  let name = file.name, type = file.type;
+  if (type.startsWith('image/')) {
+    try {
+      dataUrl = await imageToPdfDataUrl(dataUrl);
+      type = 'application/pdf';
+      name = name.replace(/\.[^.]+$/, '') + '.pdf';
+    } catch {
+      showToast('No se pudo convertir la foto a PDF; se guardará tal cual', 'warn');
+    }
+  }
+  return { name, type, data: dataUrl };
 }
 
 /**

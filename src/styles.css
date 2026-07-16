@@ -520,6 +520,9 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .file-drop { border:1.5px dashed var(--border-lt); border-radius:var(--r-sm); padding:16px; text-align:center; cursor:pointer; color:var(--ts); font-size:13px; }
 .file-drop:hover { border-color:var(--t-primary); background:var(--t-primary-dim); color:var(--t-primary-lt); }
 .file-drop svg { margin:0 auto 6px; display:block; width:24px; height:24px; }
+.file-drop-row { display:flex; gap:8px; align-items:stretch; }
+.file-drop-row .file-drop { flex:1; }
+.file-drop-row .btn-icon { flex-shrink:0; }
 .file-preview { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:8px 12px; margin-top:8px; }
 .fp-icon { display:flex; flex-shrink:0; }
 .fp-icon svg { width:22px; height:22px; color:var(--t-primary-lt); }
