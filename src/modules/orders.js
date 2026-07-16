@@ -17,6 +17,10 @@ const TAB_BY_STAGE = { A: 'a', B: 'b', C: 'c', D: 'd', Finalizado: 'd' };
 
 let activeFilter = 'all'; // etapa
 let activeSpecialty = 'all'; // especialidad del médico tratante
+let activeDoctor = 'all'; // médico tratante (MI AUDITORIA Órdenes #2)
+let activeTipo = 'all'; // tipo de orden (MI AUDITORIA Órdenes #2)
+let dateFrom = ''; // fecha de la orden, rango "desde" (MI AUDITORIA Órdenes #2)
+let dateTo = ''; // fecha de la orden, rango "hasta"
 let orderFiles = { orden: null, solicitud: null, autorizacion: null };
 let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
@@ -40,7 +44,15 @@ export async function render() {
     </div>
     <div class="orders-filters-row" id="orders-filters-row">
       <div class="filter-pills" id="orders-filters"></div>
-      <select class="fi" id="orders-filter-especialidad" style="max-width:220px"></select>
+      <select class="fi" id="orders-filter-especialidad" style="max-width:190px"></select>
+      <select class="fi" id="orders-filter-medico" style="max-width:190px"></select>
+      <select class="fi" id="orders-filter-tipo" style="max-width:170px"></select>
+      <div class="orders-filter-dates" id="orders-filter-dates">
+        <input class="fi" id="orders-filter-desde" type="date" title="Desde"/>
+        <span>–</span>
+        <input class="fi" id="orders-filter-hasta" type="date" title="Hasta"/>
+        <button type="button" class="btn btn-sm btn-icon" id="orders-filter-dates-clear" title="Limpiar fechas">✕</button>
+      </div>
     </div>
     <div id="orders-list" style="display:flex;flex-direction:column;gap:12px"></div>
   `;
@@ -50,11 +62,17 @@ export async function render() {
   const list = document.getElementById('orders-list');
   const filtersEl = document.getElementById('orders-filters');
   const espSelect = document.getElementById('orders-filter-especialidad');
+  const docSelect = document.getElementById('orders-filter-medico');
+  const tipoSelect = document.getElementById('orders-filter-tipo');
+  const desdeInput = document.getElementById('orders-filter-desde');
+  const hastaInput = document.getElementById('orders-filter-hasta');
 
   if (!state.activePatient) {
     sub.textContent = 'Selecciona un paciente para ver sus órdenes';
     filtersEl.innerHTML = '';
     espSelect.innerHTML = '';
+    docSelect.innerHTML = '';
+    tipoSelect.innerHTML = '';
     list.innerHTML = `<div class="empty-state"><div class="es-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><h3>Selecciona un paciente</h3></div>`;
     document.getElementById('sb-badge-orders').style.display = 'none';
     return;
@@ -83,18 +101,43 @@ export async function render() {
   filtersEl.querySelectorAll('[data-filter]').forEach(el =>
     el.addEventListener('click', () => { activeFilter = el.dataset.filter; render(); }));
 
-  // Filtro combinado: además de la etapa, por especialidad del médico
-  // tratante — solo se listan las especialidades que de verdad aparecen
-  // entre las órdenes de este paciente (no todo el directorio).
-  const specialtiesPresent = [...new Set(orders.map(o => docMap[o.medicoId]?.especialidad).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  // MI AUDITORIA Órdenes #2: especialidad/médico/tipo son "extensibles" a
+  // la etapa activa — solo se listan las opciones presentes entre las
+  // órdenes de la etapa actualmente seleccionada (no todo el histórico ni
+  // todo el directorio), así el filtro no muestra opciones vacías.
+  const stageScoped = orders.filter(o => activeFilter === 'all' || o._stage === activeFilter);
+
+  const specialtiesPresent = [...new Set(stageScoped.map(o => docMap[o.medicoId]?.especialidad).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (!specialtiesPresent.includes(activeSpecialty)) activeSpecialty = 'all';
   espSelect.innerHTML = `<option value="all">Todas las especialidades</option>${specialtiesPresent.map(s => `<option value="${esc(s)}" ${activeSpecialty === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}`;
   espSelect.style.display = specialtiesPresent.length ? '' : 'none';
-  espSelect.addEventListener('change', () => { activeSpecialty = espSelect.value; render(); });
+  espSelect.onchange = () => { activeSpecialty = espSelect.value; render(); };
 
-  let filtered = orders.filter(o =>
-    (activeFilter === 'all' || o._stage === activeFilter) &&
-    (activeSpecialty === 'all' || docMap[o.medicoId]?.especialidad === activeSpecialty)
+  const doctorsPresent = [...new Map(stageScoped.map(o => [o.medicoId, docMap[o.medicoId]]).filter(([mid, d]) => mid && d)).values()]
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+  if (!doctorsPresent.some(d => d.id === activeDoctor)) activeDoctor = 'all';
+  docSelect.innerHTML = `<option value="all">Todos los médicos</option>${doctorsPresent.map(d => `<option value="${d.id}" ${activeDoctor === d.id ? 'selected' : ''}>${esc(d.nombre)}</option>`).join('')}`;
+  docSelect.style.display = doctorsPresent.length ? '' : 'none';
+  docSelect.onchange = () => { activeDoctor = docSelect.value; render(); };
+
+  const tiposPresent = [...new Set(stageScoped.map(o => o.tipoOrden).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (!tiposPresent.includes(activeTipo)) activeTipo = 'all';
+  tipoSelect.innerHTML = `<option value="all">Todos los tipos</option>${tiposPresent.map(t => `<option value="${esc(t)}" ${activeTipo === t ? 'selected' : ''}>${esc(t)}</option>`).join('')}`;
+  tipoSelect.style.display = tiposPresent.length ? '' : 'none';
+  tipoSelect.onchange = () => { activeTipo = tipoSelect.value; render(); };
+
+  desdeInput.value = dateFrom;
+  hastaInput.value = dateTo;
+  desdeInput.onchange = () => { dateFrom = desdeInput.value; render(); };
+  hastaInput.onchange = () => { dateTo = hastaInput.value; render(); };
+  document.getElementById('orders-filter-dates-clear').onclick = () => { dateFrom = ''; dateTo = ''; render(); };
+
+  let filtered = stageScoped.filter(o =>
+    (activeSpecialty === 'all' || docMap[o.medicoId]?.especialidad === activeSpecialty) &&
+    (activeDoctor === 'all' || o.medicoId === activeDoctor) &&
+    (activeTipo === 'all' || o.tipoOrden === activeTipo) &&
+    (!dateFrom || (o.fechaOrden && o.fechaOrden >= dateFrom)) &&
+    (!dateTo || (o.fechaOrden && o.fechaOrden <= dateTo))
   );
   // "Que ordena": agrupa por especialidad del tratante y, dentro de cada
   // grupo, por fecha de la orden (más reciente primero).
