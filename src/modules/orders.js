@@ -160,7 +160,7 @@ function renderOrderCard(o, docMap) {
         <div class="order-sub">${esc(o.descripcion || 'Sin descripción')} · Generada ${fmtDate(o.fechaOrden)}</div>
       </div>
       <div class="order-card-actions">
-        <button class="btn btn-sm btn-icon btn-danger" data-delete-order="${o.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
+        ${o._stage === 'A' ? `<button class="btn btn-sm btn-icon btn-danger" data-delete-order="${o.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>` : ''}
       </div>
     </div>
     <div class="order-card-body">
@@ -170,12 +170,21 @@ function renderOrderCard(o, docMap) {
   </div>`;
 }
 
+/** MI AUDITORIA (Órdenes #1): una orden solo puede eliminarse mientras
+ * sigue en la etapa A (recién creada, nada tramitado todavía). Se
+ * revalida contra el servidor (no solo el botón visible en la tarjeta)
+ * para cubrir el caso de otra pestaña/dispositivo que ya la haya hecho
+ * avanzar de etapa. */
 async function deleteOrderConfirm(id) {
+  let o;
+  try { o = await api.getOrder(id); } catch { showToast('No se pudo verificar la orden', 'err'); return; }
+  if (o._stage !== 'A') {
+    showToast('Esta orden ya avanzó de etapa: solo puede editarse, no eliminarse', 'err');
+    render();
+    return;
+  }
   if (!confirm('¿Eliminar esta orden médica? Se perderá todo su seguimiento.')) return;
-  // Recoger las rutas de adjuntos ANTES de borrar la fila, para limpiar
-  // el Storage después (mejor esfuerzo).
-  let paths = [];
-  try { paths = files.attachmentPathsOfOrder(await api.getOrder(id)); } catch { /* sin limpieza */ }
+  const paths = files.attachmentPathsOfOrder(o);
   await api.deleteOrder(id);
   files.removeAttachments(paths);
   showToast('Orden eliminada', 'warn');
@@ -357,6 +366,7 @@ async function openOrderWizard(id, prefill) {
       <button class="wiz-tab ${startTab === 'd' ? 'active' : ''}" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
     </div>
     <div class="wiz-pane ${startTab === 'a' ? 'visible' : ''}" id="pane-a">
+      ${!o || o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
       <div class="form-row cols-2">
         <div class="form-field">
           <label class="fl">Médico tratante</label>
