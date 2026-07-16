@@ -18,7 +18,7 @@ export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
 const POLICY_TYPES_FIJOS = ['SOAT', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'Vida', 'Dental'];
 const CATEGORIA_POLIZA = 'poliza_tipo';
 const PARENTESCO_OPTIONS = [
-  'Madre/Padre', 'Hijo/Hija', 'Hermano/Hermana', 'Abuela/Abuelo', 'Nieto/Nieta',
+  'Madre/Padre', 'Pareja/Cónyuge', 'Hijo/Hija', 'Hermano/Hermana', 'Abuela/Abuelo', 'Nieto/Nieta',
   'Tío/Tía', 'Sobrino/Sobrina', 'Cuidador', 'Familiar', 'Representante asignado', 'Otro',
 ];
 
@@ -376,7 +376,7 @@ async function renderPoliciesSection(patientId) {
   const listHtml = policies.length ? policies.map(pol => `
     <div class="policy-item">
       <div class="policy-info">
-        <div class="policy-tipo">${esc(pol.tipo)}</div>
+        <div class="policy-tipo">${esc(pol.tipo)}${pol.aseguradora ? ' · ' + esc(pol.aseguradora) : ''}</div>
         <div class="policy-num">${pol.numeroPoliza ? esc(pol.numeroPoliza) : 'Sin número registrado'}</div>
       </div>
       <div class="policy-actions">
@@ -402,6 +402,10 @@ async function renderPoliciesSection(patientId) {
         <div class="form-field">
           <label class="fl">Número de póliza</label>
           <input class="fi" id="pf-policy-numero" type="text"/>
+        </div>
+        <div class="form-field">
+          <label class="fl">Nombre de la aseguradora</label>
+          <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…"/>
         </div>
         <div class="form-field">
           <label class="fl">Foto o PDF del carnet</label>
@@ -466,9 +470,10 @@ async function savePolicyInline(patientId) {
     showToast('Escribe el tipo de póliza', 'err'); return;
   }
   const numeroPoliza = document.getElementById('pf-policy-numero').value.trim();
+  const aseguradora = document.getElementById('pf-policy-aseguradora').value.trim();
   try {
     const tipo = await resolveCatalogValue(state.household.id, CATEGORIA_POLIZA, tipoSel, document.getElementById('pf-policy-tipo-otra').value);
-    let saved = await api.savePatientPolicy({ tipo, numeroPoliza }, state.household.id, patientId);
+    let saved = await api.savePatientPolicy({ tipo, numeroPoliza, aseguradora }, state.household.id, patientId);
     if (pendingPolicyImage) {
       const uploaded = await files.uploadAttachment(state.household.id, saved.id, 'poliza', pendingPolicyImage);
       saved = await api.savePatientPolicy({ ...saved, imagen: uploaded }, state.household.id, patientId);

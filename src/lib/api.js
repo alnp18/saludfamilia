@@ -137,6 +137,7 @@ function rowToPolicy(r) {
     patientId: r.patient_id,
     tipo: r.tipo,
     numeroPoliza: r.numero_poliza,
+    aseguradora: r.aseguradora,
     imagen: r.imagen,
     creadoEn: r.created_at,
   };
@@ -155,6 +156,7 @@ export async function savePatientPolicy(policy, householdId, patientId) {
     patient_id: patientId,
     tipo: policy.tipo,
     numero_poliza: policy.numeroPoliza || null,
+    aseguradora: policy.aseguradora || null,
     imagen: policy.imagen || null,
   };
   if (policy.id) {
