@@ -28,6 +28,12 @@ let activeDoctor = 'all'; // médico tratante (MI AUDITORIA Órdenes #2)
 let activeTipo = 'all'; // tipo de orden (MI AUDITORIA Órdenes #2)
 let dateFrom = ''; // fecha de la orden, rango "desde" (MI AUDITORIA Órdenes #2)
 let dateTo = ''; // fecha de la orden, rango "hasta"
+// MI AUDITORIA Órdenes #5: pestaña "Flujo" — línea de tiempo minimalista
+// que agrupa en un solo bloque las órdenes del mismo día + mismo médico
+// (mismo médico implica misma especialidad). 'lista' es la vista clásica
+// de tarjetas con filtros; 'flujo' es la nueva línea de tiempo.
+let ordersViewMode = 'lista';
+let expandedFlowGroups = new Set(); // claves de grupo abiertas (persiste entre renders)
 let orderFiles = { orden: null, solicitud: null, autorizacion: null };
 let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
@@ -54,6 +60,10 @@ export async function render() {
       </div>
       <button class="btn btn-primary" id="btn-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nueva orden</button>
     </div>
+    <div class="filter-pills" id="orders-view-tabs" style="margin-bottom:12px">
+      <div class="filter-pill ${ordersViewMode === 'lista' ? 'active' : ''}" data-view-mode="lista">Lista</div>
+      <div class="filter-pill ${ordersViewMode === 'flujo' ? 'active' : ''}" data-view-mode="flujo">Flujo</div>
+    </div>
     <div class="orders-filters-row" id="orders-filters-row">
       <div class="filter-pills" id="orders-filters"></div>
       <select class="fi" id="orders-filter-especialidad" style="max-width:190px"></select>
@@ -67,11 +77,16 @@ export async function render() {
       </div>
     </div>
     <div id="orders-list" style="display:flex;flex-direction:column;gap:12px"></div>
+    <div id="orders-flow"></div>
   `;
   document.getElementById('btn-new-order').addEventListener('click', () => openOrderWizard());
+  document.getElementById('orders-view-tabs').querySelectorAll('[data-view-mode]').forEach(el =>
+    el.addEventListener('click', () => { ordersViewMode = el.dataset.viewMode; render(); }));
 
   const sub = document.getElementById('orders-sub');
   const list = document.getElementById('orders-list');
+  const flow = document.getElementById('orders-flow');
+  const filtersRow = document.getElementById('orders-filters-row');
   const filtersEl = document.getElementById('orders-filters');
   const espSelect = document.getElementById('orders-filter-especialidad');
   const docSelect = document.getElementById('orders-filter-medico');
@@ -86,10 +101,17 @@ export async function render() {
     docSelect.innerHTML = '';
     tipoSelect.innerHTML = '';
     list.innerHTML = `<div class="empty-state"><div class="es-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><h3>Selecciona un paciente</h3></div>`;
+    flow.innerHTML = '';
     document.getElementById('sb-badge-orders').style.display = 'none';
     return;
   }
   sub.textContent = `Órdenes de ${state.activePatient.nombre}`;
+
+  // La pestaña Flujo tiene su propia vista agrupada (MI AUDITORIA Órdenes
+  // #5) y no usa los filtros de etapa/especialidad/médico/tipo de la Lista.
+  filtersRow.style.display = ordersViewMode === 'flujo' ? 'none' : '';
+  list.style.display = ordersViewMode === 'flujo' ? 'none' : '';
+  flow.style.display = ordersViewMode === 'flujo' ? '' : 'none';
 
   const [orders, doctors] = await Promise.all([
     api.listOrdersByPatient(state.activePatient.id),
@@ -100,6 +122,13 @@ export async function render() {
   const pendingCount = orders.filter(o => o._stage === 'A' || o._stage === 'B').length;
   const badge = document.getElementById('sb-badge-orders');
   if (pendingCount) { badge.style.display = 'flex'; badge.textContent = pendingCount; } else { badge.style.display = 'none'; }
+
+  if (ordersViewMode === 'flujo') {
+    renderFlowView(orders, docMap, flow);
+    if (pendingOptions?.openWizard) { pendingOptions = null; openOrderWizard(); }
+    else if (pendingOptions?.openOrderId) { const id = pendingOptions.openOrderId; pendingOptions = null; openOrderModal(id); }
+    return;
+  }
 
   const counts = { all: orders.length };
   STAGE_ORDER.forEach(s => counts[s] = orders.filter(o => o._stage === s).length);
@@ -229,6 +258,77 @@ function renderOrderCard(o, docMap) {
       ${tags.length ? `<div class="order-tags">${tags.join('')}</div>` : ''}
     </div>
   </div>`;
+}
+
+// ─────────────────────────────────────────
+// Pestaña "Flujo" (MI AUDITORIA Órdenes #5) — línea de tiempo minimalista.
+// Agrupa en un solo bloque las órdenes generadas el mismo día para el mismo
+// médico tratante (mismo médico ⇒ misma especialidad), mostrando en
+// colapsado solo especialidad + fecha; al hacer click se expande el
+// detalle del día (médico y qué más se ordenó ese día).
+// ─────────────────────────────────────────
+function flowGroupKey(o) { return `${o.fechaOrden || 'sin-fecha'}|${o.medicoId || 'sin-medico'}`; }
+
+function renderFlowView(orders, docMap, container) {
+  if (!orders.length) {
+    container.innerHTML = `<div class="empty-state">
+      <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
+      <h3>Sin órdenes registradas</h3>
+      <p>Registra la primera orden médica de ${esc(state.activePatient.nombre)}.</p>
+      <button class="btn btn-primary" id="btn-new-order-empty-flow" style="margin-top:8px">Nueva orden</button>
+    </div>`;
+    document.getElementById('btn-new-order-empty-flow')?.addEventListener('click', () => openOrderWizard());
+    return;
+  }
+
+  const groups = new Map();
+  orders.forEach(o => {
+    const key = flowGroupKey(o);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  });
+  const groupList = [...groups.entries()]
+    .map(([key, items]) => ({ key, items, fecha: items[0].fechaOrden || '' }))
+    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
+
+  container.innerHTML = `<div class="flow-timeline">${groupList.map(g => {
+    const doc = docMap[g.items[0].medicoId];
+    const especialidad = doc?.especialidad || 'Sin especialidad';
+    const expanded = expandedFlowGroups.has(g.key);
+    return `<div class="flow-group ${expanded ? 'expanded' : ''}">
+      <div class="flow-dot"></div>
+      <div class="flow-body">
+        <div class="flow-head" data-flow-toggle="${g.key}">
+          <div class="flow-head-main">
+            <span class="flow-esp">${esc(especialidad)}</span>
+            <span class="flow-date">${fmtDate(g.fecha)}</span>
+          </div>
+          <div class="flow-head-side">
+            <span class="flow-count">${g.items.length} ${g.items.length === 1 ? 'orden' : 'órdenes'}</span>
+            <svg class="flow-chevron" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
+          </div>
+        </div>
+        <div class="flow-detail">
+          <div class="flow-detail-doc">${doc ? esc(doc.nombre) : 'Médico no asignado'}</div>
+          <div class="flow-detail-items">${g.items.map(o => `<div class="flow-detail-item" data-flow-view-order="${o.id}">
+            <span class="flow-item-tipo">${esc(o.tipoOrden || 'Orden médica')}</span>
+            <span class="flow-item-desc">${esc(o.descripcion || 'Sin descripción')}</span>
+            <span class="tag ${o._stage === 'Finalizado' ? 'tag-green' : 'tag-amber'}">${esc((isAuthTableType(o.tipoOrden) ? STAGE_LABELS_AUTH : STAGE_LABELS)[o._stage] || o._stage)}</span>
+          </div>`).join('')}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+
+  container.querySelectorAll('[data-flow-toggle]').forEach(el => el.addEventListener('click', () => {
+    const key = el.dataset.flowToggle;
+    if (expandedFlowGroups.has(key)) expandedFlowGroups.delete(key); else expandedFlowGroups.add(key);
+    renderFlowView(orders, docMap, container);
+  }));
+  container.querySelectorAll('[data-flow-view-order]').forEach(el => el.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openOrderModal(el.dataset.flowViewOrder);
+  }));
 }
 
 /** MI AUDITORIA (Órdenes #1): una orden solo puede eliminarse mientras
