@@ -90,6 +90,13 @@ body {
   flex-shrink: 0; z-index: 100;
   box-shadow: 0 1px 0 var(--border), 0 4px 20px rgba(0,0,0,.25);
 }
+.mobile-nav-btn {
+  display: none; /* solo visible en móvil, ver @media más abajo */
+  width: 40px; height: 100%; flex-shrink: 0; border: none; background: none;
+  color: var(--ts); align-items: center; justify-content: center; cursor: pointer;
+}
+.mobile-nav-btn:hover { color: var(--tp); }
+.mobile-nav-btn svg { width: 20px; height: 20px; }
 .hdr-logo {
   width: var(--sidebar-w); height: 100%;
   display: flex; align-items: center; gap: 10px; padding: 0 18px;
@@ -809,8 +816,44 @@ body.patient-themed:not(.light-mode) { color-scheme: dark; }
   .dash3 > div:last-child { grid-column:span 2; display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 }
 @media (max-width:768px) {
-  :root { --sidebar-w:0px; }
-  #sidebar { display:none; }
+  /* Antes el sidebar se ocultaba por completo a este ancho, sin ningún
+     reemplazo — no había forma de navegar entre secciones en el celular.
+     Ahora es un panel superpuesto (drawer) que se abre con el botón de
+     menú del header (P2 #9 — responsive móvil, la app se usa sobre todo
+     desde el teléfono). */
+  .mobile-nav-btn { display: flex; }
+  /* El texto del logo (~100px) más su padding se comían casi todo el
+     espacio disponible, dejando el selector de paciente sin lugar — a
+     este ancho el ícono solo ya identifica la app. */
+  .hdr-logo { width: auto; padding: 0 10px; border-right: none; }
+  .hdr-logo-text { display: none; }
+  /* flex:1 en .hdr-center compite con margin-left:auto de .hdr-right por
+     el mismo espacio libre (el margen automático se lo queda todo y deja
+     a hdr-center en ~0) — se anula ese margen para que el flex-grow de
+     hdr-center sea el único que reparte el espacio sobrante. */
+  .hdr-center { flex: 1; min-width: 0; margin-left: 8px; }
+  .hdr-right { margin-left: 0; }
+  .patient-selector { min-width: 0; width: 100%; }
+  .ps-info { min-width: 0; flex: 1; }
+  .ps-label { display: none; }
+  .ps-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .theme-toggle-label { display: none; }
+  .theme-toggle-btn { width: 36px; height: 36px; padding: 0; justify-content: center; gap: 0; border-radius: 8px; }
+  #patient-drop { left: 8px; right: 8px; min-width: 0; }
+
+  #sidebar {
+    position: fixed; top: var(--header-h); bottom: 0; left: 0; z-index: 401;
+    width: min(78vw, 260px); min-width: 0;
+    transform: translateX(-100%); transition: transform .22s ease;
+    box-shadow: 12px 0 32px rgba(0,0,0,.45);
+  }
+  #sidebar.open { transform: translateX(0); }
+  #sidebar-backdrop {
+    display: none; position: fixed; inset: 0; top: var(--header-h);
+    background: rgba(0,0,0,.5); z-index: 400;
+  }
+  #sidebar-backdrop.open { display: block; }
+
   .dash-kpi { grid-template-columns:1fr 1fr; }
   .dash3, .dash3 > div:last-child { grid-template-columns:1fr; }
   .form-row.cols-2,.form-row.cols-3 { grid-template-columns:1fr; }

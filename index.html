@@ -58,6 +58,9 @@
 
 <!-- ═══ HEADER ═══ -->
 <header id="app-header" style="display:none">
+  <button class="mobile-nav-btn" id="mobile-nav-btn" title="Menú" aria-label="Abrir menú">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
   <div class="hdr-logo">
     <div class="hdr-logo-icon">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -67,7 +70,7 @@
   <div class="hdr-center">
     <div class="patient-selector" id="patient-selector">
       <div class="ps-avatar" id="ps-avatar">—</div>
-      <div>
+      <div class="ps-info">
         <div class="ps-label">Paciente activo</div>
         <div class="ps-name" id="ps-name">Seleccionar paciente</div>
       </div>
@@ -100,6 +103,7 @@
 </div>
 
 <div id="app-shell" style="display:none">
+  <div id="sidebar-backdrop"></div>
   <nav id="sidebar">
     <div class="sb-group">
       <div class="sb-label">Principal</div>

@@ -2,7 +2,7 @@ import * as auth from './lib/auth.js';
 import * as api from './lib/api.js';
 import { state, restoreActivePatientId, persistActivePatientId, restoreLightMode, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
 import { initModalOverlay, showToast } from './lib/modal.js';
-import { wireHeader, closePatientDrop } from './modules/header.js';
+import { wireHeader, closePatientDrop, closeMobileNav } from './modules/header.js';
 
 import * as Dashboard from './modules/dashboard.js';
 import * as Patients from './modules/patients.js';
@@ -35,6 +35,7 @@ function goView(v, options) {
   document.querySelector(`[data-view="${v}"]`)?.classList.add('active');
   state.currentView = v;
   closePatientDrop();
+  closeMobileNav();
   VIEW_RENDERERS[v]?.();
 }
 
