@@ -5,12 +5,15 @@ import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, initials, avatarColor, calcAge } from '../lib/utils.js';
+import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
 
 // Tipos fijos de póliza (ver plan P1.5); el household puede sumar los suyos
-// vía la opción "Otra…", que queda disponible para cargas futuras.
+// vía la opción "Otra…", que queda disponible para cargas futuras. Mismo
+// patrón "Otra… extensible" que Vía de administración (Medicamentos) y
+// Especialidad (Médicos) — ver nota transversal del plan (src/lib/extensibleCatalog.js).
 const POLICY_TYPES_FIJOS = ['SOAT', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'Vida', 'Dental'];
 const CATEGORIA_POLIZA = 'poliza_tipo';
 const PARENTESCO_OPTIONS = [
@@ -290,19 +293,13 @@ async function renderPoliciesSection(patientId) {
       </div>
     </div>`).join('') : `<p style="font-size:12.5px;color:var(--ts);margin:0 0 8px">Sin pólizas registradas.</p>`;
 
-  const allTypes = [...POLICY_TYPES_FIJOS, ...customTypes.filter(t => !POLICY_TYPES_FIJOS.includes(t))];
-  const typeOptionsHtml = allTypes.map(t => `<option>${esc(t)}</option>`).join('');
-
   container.innerHTML = `
     <div id="pf-policies-list">${listHtml}</div>
     ${policyFormOpen ? `
       <div class="form-row cols-2" style="margin-top:8px">
         <div class="form-field">
           <label class="fl">Tipo de póliza</label>
-          <select class="fi" id="pf-policy-tipo">
-            ${typeOptionsHtml}
-            <option value="__otra__">Otra…</option>
-          </select>
+          <select class="fi" id="pf-policy-tipo">${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyOtra ? OTRA_VALUE : '')}</select>
         </div>
         <div class="form-field ${pendingPolicyOtra ? '' : 'hidden'}">
           <label class="fl">Especificar tipo</label>
@@ -338,7 +335,7 @@ async function renderPoliciesSection(patientId) {
 
   if (policyFormOpen) {
     document.getElementById('pf-policy-tipo').addEventListener('change', (e) => {
-      pendingPolicyOtra = e.target.value === '__otra__';
+      pendingPolicyOtra = e.target.value === OTRA_VALUE;
       renderPoliciesSection(patientId);
     });
     document.getElementById('pf-policy-save-btn').addEventListener('click', () => savePolicyInline(patientId));
@@ -371,16 +368,12 @@ async function renderPoliciesSection(patientId) {
 
 async function savePolicyInline(patientId) {
   const tipoSel = document.getElementById('pf-policy-tipo').value;
-  let tipo = tipoSel;
-  if (tipoSel === '__otra__') {
-    tipo = document.getElementById('pf-policy-tipo-otra').value.trim();
-    if (!tipo) { showToast('Escribe el tipo de póliza', 'err'); return; }
+  if (tipoSel === OTRA_VALUE && !document.getElementById('pf-policy-tipo-otra').value.trim()) {
+    showToast('Escribe el tipo de póliza', 'err'); return;
   }
   const numeroPoliza = document.getElementById('pf-policy-numero').value.trim();
   try {
-    if (tipoSel === '__otra__') {
-      await api.addCatalogOption(state.household.id, CATEGORIA_POLIZA, tipo);
-    }
+    const tipo = await resolveCatalogValue(state.household.id, CATEGORIA_POLIZA, tipoSel, document.getElementById('pf-policy-tipo-otra').value);
     let saved = await api.savePatientPolicy({ tipo, numeroPoliza }, state.household.id, patientId);
     if (pendingPolicyImage) {
       const uploaded = await files.uploadAttachment(state.household.id, saved.id, 'poliza', pendingPolicyImage);
