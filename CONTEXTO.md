@@ -1,6 +1,6 @@
 # SaludFamilia — Contexto del proyecto
 
-_Última actualización: 2026-07-15 (verificación E2E + recuperación de contraseña + previsualizar contraseña)_
+_Última actualización: 2026-07-16 (invitaciones + exportar/importar + Storage + auditoría RLS)_
 
 ## Qué es
 
@@ -20,16 +20,25 @@ recomendado en `docs/Plan_de_Avance_MVP.docx`:
    aislamiento RLS confirmado en ambas direcciones). Detalle abajo.
 2. ✅ Recuperación de contraseña (P1 #4) — **COMPLETADA** el 2026-07-15
    (flujo completo de "olvidé mi contraseña" con evento `PASSWORD_RECOVERY`,
-   verificado E2E en producción con correo real). Detalle abajo.
-3. ✅ Previsualizar contraseña — **COMPLETADA** el 2026-07-15. Mejora no
-   planeada originalmente, agregada a partir de feedback directo del
-   usuario durante el E2E de recuperación (la falta de esta opción llevaba
-   a errores de tipeo al iniciar sesión). Detalle abajo.
-4. Una tanda extensa de ajustes de interfaz, ya relevada y lista para
-   ejecutar módulo por módulo (P1.5, Sonnet).
-5. Dos piezas de arquitectura nueva (directorio público auditado y
-   exportar/importar pacientes entre households), diseñadas a alto nivel
-   pero sin implementar — requieren cuidado especial por tocar RLS (Fable).
+   verificado E2E en producción con correo real), junto con la mejora de
+   previsualizar contraseña (botón ojo/ojo tachado) surgida del feedback
+   del usuario durante ese E2E.
+3. ✅ Invitar miembros al household (P1 #6) — **COMPLETADA** el 2026-07-15
+   y verificada E2E en producción con el ciclo completo (generar código →
+   canjear → salir de la familia). Detalle abajo.
+4. ✅ Exportar/Importar pacientes entre familias (pieza B de arquitectura)
+   — **COMPLETADA** el 2026-07-15, con diseño cambiado respecto al plan
+   original: archivo cifrado descargado al dispositivo en vez de llave en
+   el servidor. Verificada por el usuario en producción. Detalle abajo.
+5. ✅ Migrar adjuntos a Supabase Storage (P1 #7) — **COMPLETADA** el
+   2026-07-15 (migración 0006; producción tenía 0 adjuntos base64, no
+   hubo datos que mover). Pendiente su E2E por UI en producción.
+6. ✅ Auditoría de seguridad RLS pre-lanzamiento (P1 #8) — **COMPLETADA**
+   el 2026-07-16 (migraciones 0007 y 0008). Detalle abajo.
+7. Una tanda extensa de ajustes de interfaz, ya relevada y lista para
+   ejecutar módulo por módulo (P1.5, Sonnet) — el frente grande restante.
+8. Pieza A de arquitectura (directorio público auditado de médicos y
+   centros), diseñada a alto nivel pero sin implementar (Fable).
 
 ## Arquitectura
 
@@ -40,18 +49,24 @@ saludfamilia/
 │       ├── 0001_init_schema.sql
 │       ├── 0002_harden_functions.sql
 │       ├── 0003_indexes_and_rls_perf.sql
-│       └── 0004_fix_households_select_rls.sql
+│       ├── 0004_fix_households_select_rls.sql
+│       ├── 0005_household_invitations.sql   ← invitaciones + canje + bajas
+│       ├── 0006_storage_adjuntos.sql        ← bucket privado + políticas
+│       ├── 0007_auditoria_rls_hardening.sql ← FKs compuestas, schema private…
+│       └── 0008_indices_fks_compuestas.sql
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
 │   │   ├── auth.js            ← signUp/signIn/signOut + ensureHousehold()
 │   │   │                        + requestPasswordReset/updatePassword
-│   │   ├── api.js
+│   │   ├── api.js              ← + sección FAMILIA (miembros/invitaciones)
+│   │   ├── files.js            ← adjuntos en Storage (subir/firmar/borrar)
+│   │   ├── exportImport.js     ← exportar/importar cifrado (.sfam)
 │   │   ├── theme.js            ← ThemeEngine: paleta determinista por paciente
 │   │   ├── icons.js
 │   │   ├── modal.js
 │   │   └── utils.js
-│   ├── modules/                ← incluye header.js
+│   ├── modules/                ← incluye header.js y family.js
 │   ├── state.js
 │   └── main.js                 ← auth screen + bootstrap + router
 ├── index.html / vite.config.js / vercel.json / package.json
@@ -60,7 +75,10 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, 4 migraciones aplicadas.
+  `ACTIVE_HEALTHY`, 8 migraciones aplicadas. Plan gratuito — "Leaked
+  password protection" NO se puede activar (requiere Pro); el mínimo de
+  contraseña se subió a 8 caracteres en Auth (2026-07-16). PostgreSQL 17.
+  Bucket privado de Storage `adjuntos` (10MB máx., imágenes y PDF).
 - **Vercel**: proyecto `saludfamilia` (team `alnp`, id
   `team_upa18NsIqLYAoLBKzY61ioPk`). URL de producción:
   **https://saludfamilia.vercel.app** (alias también
@@ -86,7 +104,8 @@ saludfamilia/
 ## Estado de los datos (importante para el próximo agente)
 
 **La base de datos YA NO está vacía.** Tras la verificación E2E del
-2026-07-15 se conservaron deliberadamente datos de muestra. Conteo actual:
+2026-07-15 se conservaron deliberadamente datos de muestra. Conteo actual
+(tras los E2E de invitaciones y exportar/importar):
 
 - `auth.users`: **2**
   - `alnp.alnp@gmail.com` (id `c310a4a2-887d-47fe-840b-221c9deb746c`) —
@@ -94,9 +113,14 @@ saludfamilia/
     (`f1196d77-f03f-40a7-b84c-36fc338cac36`), rol owner. Tiene el set
     completo de datos de prueba (ver abajo).
   - `dacn.2026@gmail.com` (id `09c80114-1114-4932-966d-ddd6f3d66c60`) —
-    creada entre sesiones, correo confirmado, household propio, **sin
-    pacientes**. (El plan viejo la daba por borrada; reapareció.)
+    correo confirmado. Su household actual
+    (`2d3348a6-fe8c-4822-a87f-6024039da6bd`) fue creado automáticamente el
+    2026-07-16 al **salir** de la familia de alnp durante el E2E de
+    invitaciones (el anterior se eliminó al canjear el código). Vacío.
 - `households`: 2 · `household_members`: 2
+- `household_invitations`: quedan registros de los E2E — al menos una
+  invitación usada (auditoría de quién entró) y pendientes sin usar que
+  caducan a los 7 días de creadas.
 - Datos de `alnp.alnp` (todos marcados como "prueba E2E"):
   - `patients`: 1 — "Prueba E2E Paciente" (1990-05-15, Masculino, O+,
     EPS Prueba, afiliado TEST-000123).
@@ -142,13 +166,12 @@ pasos PASAN:**
   persiste en el registro de signos vitales. La columna existe y queda
   vacía. Revisar si se quiere poblar al guardar.
 - **Advisors de seguridad (preexistentes, Supabase):**
-  - `is_household_member(hid uuid)` es SECURITY DEFINER e invocable vía
-    `/rest/v1/rpc/is_household_member` por el rol `authenticated` (WARN).
-    Es justo el punto a revisar en la auditoría RLS de Fable (P1 #8):
-    revocar EXECUTE, pasar a SECURITY INVOKER, o sacarla del schema
-    expuesto.
-  - "Leaked password protection" desactivado en Auth (WARN) — activar el
-    chequeo contra HaveIBeenPwned si se desea.
+  - `is_household_member(hid uuid)` era SECURITY DEFINER invocable vía
+    RPC (WARN). **Resuelto en la auditoría P1 #8 del 2026-07-16**: se
+    movió al schema `private`, fuera del API expuesto.
+  - "Leaked password protection" desactivado en Auth (WARN) — se intentó
+    activar el 2026-07-16: **requiere plan Pro**. Mitigación aplicada:
+    mínimo de contraseña 8 caracteres.
 
 ## Recuperación de contraseña (P1 #4) — completada el 2026-07-15
 
@@ -201,6 +224,108 @@ repetir contraseña del formulario de auth, reseteado a oculto cada vez que
 cambia el modo del formulario. Verificado por el usuario en producción:
 "la visualización está perfecta, super eficiente".
 
+## Invitar miembros al household (P1 #6) — completada el 2026-07-15
+
+Multiusuario real: varias cuentas (cada una con su propio login) comparten
+el mismo household y ven/editan los mismos datos. Migración `0005` +
+vista **Familia** en el sidebar (grupo Gestión). Commit `9c312df`.
+
+- **Modelo**: el owner genera un **código de invitación** desde la app y
+  lo comparte por el canal que quiera (sin infraestructura de correo). El
+  invitado crea su cuenta normal y lo canjea en Familia → "Unirse a otra
+  familia". Un solo uso, caduca a los 7 días, revocable.
+- **Seguridad**: el código nunca se guarda en claro (solo hash sha256; el
+  texto plano se muestra una única vez). Crear y canjear son funciones
+  SECURITY DEFINER con autorización interna (`create_household_invitation`
+  solo owner; `redeem_household_invitation` valida y marca usada de forma
+  atómica). El cliente no tiene INSERT/UPDATE sobre la tabla.
+- **Un household por usuario**: al canjear, el household propio del
+  invitado se elimina solo si está completamente vacío; si tiene datos u
+  otros miembros, el canje se bloquea sin quemar el código (el camino para
+  mover datos es Exportar/Importar, ver abajo).
+- **Roles**: owner invita/revoca/saca miembros y no puede borrarse a sí
+  mismo; los members tienen CRUD completo de datos, pueden salir por su
+  cuenta (al recargar se les crea una familia nueva vacía) y no pueden
+  invitar. `household_members_with_email` expone el correo SOLO de
+  co-miembros (auth.users no es accesible desde el cliente).
+- **Verificación**: 19 casos de seguridad con JWT simulado + rollback, y
+  E2E real en producción con el ciclo completo (alnp generó código → dacn
+  canjeó → household viejo eliminado → dacn salió → familia nueva vacía),
+  confirmado por SQL en cada paso.
+
+## Exportar / Importar pacientes (pieza B) — completada el 2026-07-15
+
+**El diseño cambió respecto al plan original** (llave guardada en el
+servidor): ahora es un **archivo cifrado que se descarga al dispositivo**
+(`.sfam`). El servidor nunca ve el contenido exportado ni la contraseña;
+no hubo cambios de esquema ni RLS (todo por el API existente). Commit
+`2118b64`. Verificado por el usuario en producción.
+
+- **Exportar** (vista Familia): selección de pacientes (todos por defecto)
+  + contraseña propia del archivo escrita dos veces (mín. 8; NO es la de
+  la cuenta — el archivo puede compartirse). Incluye órdenes,
+  medicamentos (con cadenas de versiones), signos vitales, adjuntos
+  embebidos, y los médicos/centros referenciados por esas órdenes.
+- **Cifrado**: AES-256-GCM, clave derivada por PBKDF2 (SHA-256, 310k
+  iteraciones), en el navegador (Web Crypto). GCM autentica: contraseña
+  incorrecta o archivo alterado fallan al descifrar. Sin la contraseña el
+  archivo es ilegible; si se pierde, se exporta de nuevo.
+- **Importar**: selector de archivo + contraseña → resumen del contenido →
+  confirmación → se crea todo en la familia actual con IDs remapeados.
+- **Flujo "Unirse a otra familia" con datos**: al tocar "Unirme" aparece
+  una ventana que ofrece exportar primero y explica los pasos (exportar →
+  vaciar manualmente los módulos → volver a canjear). Decisión del
+  usuario: sin borrado masivo automático.
+
+## Adjuntos en Supabase Storage (P1 #7) — completada el 2026-07-15
+
+Migración `0006` + `src/lib/files.js`. Commit `b3161d4`. Los archivos de
+las órdenes (orden/solicitud/autorización) dejaron de guardarse como
+base64 dentro de jsonb: ahora van al bucket privado `adjuntos`, con rutas
+`<household_id>/<order_id>/<slot>-<ts>-<nombre>` y políticas de Storage
+que reutilizan `is_household_member()` — probadas con JWT simulado.
+
+- Formato persistido nuevo: `{name, type, size, path}`; el viejo
+  `{name, type, data}` se sigue **leyendo** (compatibilidad).
+- Migración perezosa: editar una orden con adjuntos base64 los sube a
+  Storage; importar un `.sfam` viejo también.
+- Límite por archivo: 4MB → 10MB. Miniaturas y apertura con URLs firmadas
+  (bucket privado). Limpieza del bucket al reemplazar/quitar/eliminar.
+- Verificado por SQL que producción tenía **0 adjuntos base64** — no hubo
+  datos que migrar. **Pendiente: E2E por UI en producción** (subir un
+  archivo real a una orden y verlo).
+
+## Auditoría de seguridad RLS (P1 #8) — completada el 2026-07-16
+
+Migraciones `0007` (endurecimiento) y `0008` (índices). Commit `aa7d92d`.
+
+**Hallazgos corregidos:**
+
+1. `is_household_member()` movida al schema `private` (no expuesto por
+   PostgREST): desaparece el WARN que motivó la auditoría. Las políticas
+   la referencian por OID — flujo de invitaciones verificado intacto.
+2. **FKs compuestas** `(col, household_id)` en órdenes/medicamentos/
+   vitales/médicos: ya no se puede referenciar pacientes, médicos o
+   centros de otra familia (antes era posible — sin fuga de lectura, pero
+   con contaminación referencial). 0 violaciones preexistentes.
+3. `households.created_by` era reasignable y otorga visibilidad
+   permanente vía `households_select` (un ex-miembro podría retener
+   acceso). Ahora solo `name` es actualizable (grants de columna).
+4. Defensa en profundidad: revocado UPDATE en `household_members`,
+   INSERT/UPDATE en `household_invitations`, y TODO acceso de `anon` a
+   tablas de public.
+
+**Aceptado y documentado** (comment on function): las 3 RPC definer del
+sistema de invitaciones son intencionales. "Leaked password protection"
+**requiere plan Pro** (la API lo rechaza en el gratuito) — pendiente si
+se paga; como mitigación, mínimo de contraseña subido a 8 en Auth y en el
+cliente (commit `884b428`).
+
+**Matriz de pruebas** (todas pasan): 12 casos cross-tenant, FK compuesta
+bloqueando referencias ajenas, created_by inmutable, escalada de rol
+bloqueada, anon sin acceso, canje intacto, y regresión de los flujos
+normales incluido el camino del bug 403 histórico.
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -219,35 +344,47 @@ cambia el modo del formulario. Verificado por el usuario en producción:
 6. **P1 #4 — Recuperación de contraseña: COMPLETADA** el 2026-07-15, junto
    con la mejora de previsualizar contraseña agregada durante su
    verificación E2E (ver sección dedicada arriba).
-7. **Relevamiento extenso de UI/UX** en `docs/Plan_de_Avance_MVP.docx`
-   (sección P1.5), módulo por módulo.
-8. **Dos piezas de arquitectura diseñadas a alto nivel (sin implementar)**:
-   directorio público auditado y exportar/importar pacientes.
+7. **P1 #6 — Invitaciones al household: COMPLETADA** el 2026-07-15 y
+   verificada E2E en producción (ver sección dedicada arriba).
+8. **Pieza B — Exportar/Importar pacientes: COMPLETADA** el 2026-07-15
+   como archivo cifrado descargable, diseño distinto al original (ver
+   sección dedicada arriba).
+9. **P1 #7 — Adjuntos en Storage: COMPLETADA** el 2026-07-15 (E2E por UI
+   pendiente) y **P1 #8 — Auditoría RLS: COMPLETADA** el 2026-07-16 (ver
+   secciones dedicadas arriba).
+10. **Relevamiento extenso de UI/UX** en `docs/Plan_de_Avance_MVP.docx`
+    (sección P1.5), módulo por módulo.
+11. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
+    directorio público auditado de médicos y centros.
 
 ## Criterio de asignación de agentes de Claude
 
-- **Fable** (máxima capacidad): seguridad RLS y migraciones de datos.
-  Incluye: invitar miembros al household, migración a Supabase Storage,
-  auditoría RLS pre-lanzamiento (empezar por el WARN de
-  `is_household_member`), directorio público auditado, exportar/importar
-  pacientes.
-- **Opus**: flujos que cruzan varios archivos y estados. La recuperación de
-  contraseña (el caso que motivó este criterio) ya está implementada y
-  verificada E2E; no queda ningún ítem de este tipo pendiente por ahora.
+- **Fable** (máxima capacidad): seguridad RLS y migraciones de datos. Ya
+  ejecutó: invitaciones (P1 #6), exportar/importar (pieza B), Storage
+  (P1 #7) y la auditoría RLS (P1 #8). Del plan actual solo le queda la
+  **pieza A (directorio público auditado)** y cualquier cambio futuro de
+  RLS/esquema.
+- **Opus**: flujos que cruzan varios archivos y estados. Sin ítems
+  pendientes por ahora.
 - **Sonnet**: tareas acotadas y mecánicas — configuración, UI, limpieza,
-  contenido. Incluye toda la sección P1.5 de edición de interfaz.
+  contenido. Incluye toda la sección P1.5 de edición de interfaz (el
+  frente grande restante) y las tareas P2.
 
 ## Próximos pasos sugeridos para quien retome
 
-1. Con el E2E en producción y la recuperación de contraseña ya cerrados, el
-   frente más "listo para ejecutar" es la tanda de UI (P1.5, Sonnet):
+1. E2E corto de adjuntos en producción: subir un PDF/foto a una orden,
+   verlo con el clic en el nombre, reemplazarlo y eliminar la orden
+   (verifica la limpieza del bucket).
+2. La tanda de UI (P1.5, Sonnet) es el frente más "listo para ejecutar":
    empezar por el patrón transversal 'Otra extensible' y el de imágenes
    ampliables/descargables, que se repiten en varios módulos.
-2. Antes de tocar cualquier política RLS nueva, reproducir el error primero
+3. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
-   una transacción con `rollback` (patrón usado con éxito en el E2E para
-   verificar aislamiento sin arriesgar datos).
-3. Decidir qué hacer con los datos de prueba conservados (dejarlos como
+   una transacción con `rollback` (patrón usado con éxito en todos los
+   E2E de seguridad de este proyecto). Ojo: `is_household_member` ahora
+   vive en el schema `private`, y Supabase bloquea DELETEs directos sobre
+   `storage.objects` (usar la API de Storage).
+4. Decidir qué hacer con los datos de prueba conservados (dejarlos como
    muestra o limpiarlos antes del lanzamiento real).
 
 Ver el plan de avance detallado y priorizado en
