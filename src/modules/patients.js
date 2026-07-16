@@ -4,9 +4,10 @@ import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
-import { esc, initials, avatarColor, calcAge } from '../lib/utils.js';
+import { esc, initials, avatarColor, calcAge, fmtDate } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/avatar.js';
+import { openViewOverlay } from '../lib/viewModeOverlay.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -82,8 +83,8 @@ export async function render() {
           <div class="pc-sub">${age != null ? age + ' años · ' : ''}${esc(p.tipoSangre || '')} ${esc(p.sexo || '')}</div>
         </div>
         <div class="pc-actions">
-          <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${p.id}" title="Editar">
-            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          <button class="btn btn-sm btn-icon btn-ghost" data-view-id="${p.id}" title="Ver ficha completa">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/></svg>
           </button>
           <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${p.id}" title="Eliminar">
             <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -101,15 +102,102 @@ export async function render() {
 
   grid.querySelectorAll('[data-select-id]').forEach(el => {
     el.addEventListener('click', async (e) => {
-      if (e.target.closest('[data-edit-id]') || e.target.closest('[data-delete-id]')) return;
+      if (e.target.closest('[data-view-id]') || e.target.closest('[data-delete-id]')) return;
       const p = patients.find(x => x.id === el.dataset.selectId);
       if (p) await setActivePatientCb?.(p);
     });
   });
-  grid.querySelectorAll('[data-edit-id]').forEach(el =>
-    el.addEventListener('click', (e) => { e.stopPropagation(); openPatientModal(el.dataset.editId); }));
+  // MI AUDITORIA #4b: el botón Editar ya no vive en la tarjeta — se abre
+  // desde la barra fija del Modo vista (openPatientViewMode).
+  grid.querySelectorAll('[data-view-id]').forEach(el =>
+    el.addEventListener('click', (e) => { e.stopPropagation(); openPatientViewMode(el.dataset.viewId); }));
   grid.querySelectorAll('[data-delete-id]').forEach(el =>
     el.addEventListener('click', (e) => { e.stopPropagation(); deletePatient(el.dataset.deleteId); }));
+}
+
+function pvField(label, value) {
+  if (value === null || value === undefined || value === '') return '';
+  return `<div class="pv-field"><div class="pv-field-label">${esc(label)}</div><div class="pv-field-value">${esc(value)}</div></div>`;
+}
+
+/**
+ * Modo vista (MI AUDITORIA #4): toda la información del paciente de solo
+ * lectura, en una ventana sobrepuesta con barra fija (Editar + Cerrar) —
+ * ver src/lib/viewModeOverlay.js. El botón Editar cierra esta ventana y
+ * abre el formulario de edición ya existente (openPatientModal); no hay
+ * un segundo formulario duplicado.
+ */
+async function openPatientViewMode(id) {
+  const [patient, policies] = await Promise.all([
+    api.getPatient(id),
+    api.listPatientPolicies(id),
+  ]);
+  const age = patient.fechaNacimiento ? calcAge(patient.fechaNacimiento) + ' años' : null;
+  const ce = patient.contactoEmergencia;
+  const ceNombre = ce
+    ? [ce.primerNombre, ce.segundoNombre, ce.primerApellido, ce.segundoApellido].filter(Boolean).join(' ')
+    : '';
+
+  const policiesHtml = policies.length ? policies.map(pol => `
+    <div class="policy-item">
+      <div class="policy-info">
+        <div class="policy-tipo">${esc(pol.tipo)}${pol.aseguradora ? ' · ' + esc(pol.aseguradora) : ''}</div>
+        <div class="policy-num">${pol.numeroPoliza ? esc(pol.numeroPoliza) : 'Sin número registrado'}</div>
+      </div>
+      ${pol.imagen ? `<div class="policy-actions"><button type="button" class="btn btn-sm btn-ghost" data-pv-view-policy="${pol.id}">Ver carnet</button></div>` : ''}
+    </div>`).join('') : `<p style="font-size:12.5px;color:var(--ts);margin:0">Sin pólizas registradas.</p>`;
+
+  const bodyHtml = `
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px">
+      ${avatarPreviewHtml(patient)}
+      <div>
+        <div style="font-size:16px;font-weight:700">${esc(patient.nombre || '—')}</div>
+        <div style="font-size:12.5px;color:var(--ts)">${[age, patient.sexo, patient.tipoSangre].filter(Boolean).map(v => esc(v)).join(' · ') || '—'}</div>
+      </div>
+    </div>
+
+    <div class="pv-section-title">Datos personales</div>
+    <div class="pv-field-row">
+      ${pvField('Fecha de nacimiento', patient.fechaNacimiento ? fmtDate(patient.fechaNacimiento) : '')}
+      ${pvField('EPS', patient.eps)}
+      ${pvField('Número de afiliado', patient.numeroAfiliado)}
+      ${pvField('Dirección', patient.direccion)}
+    </div>
+
+    ${ce ? `
+      <div class="pv-section-title">Contacto de emergencia</div>
+      <div class="pv-field-row">
+        ${pvField('Nombre', ceNombre)}
+        ${pvField('Parentesco', ce.parentesco)}
+        ${pvField('Teléfono 1', ce.telefono1)}
+        ${pvField('Teléfono 2', ce.telefono2)}
+        ${pvField('Ciudad', ce.ciudad)}
+        ${pvField('Dirección', ce.direccion)}
+      </div>` : ''}
+
+    <div class="pv-section-title">Pólizas de seguro</div>
+    ${policiesHtml}
+
+    ${patient.notas ? `
+      <div class="pv-section-title">Notas</div>
+      <div style="font-size:13px;color:var(--tp);line-height:1.6;white-space:pre-wrap">${esc(patient.notas)}</div>` : ''}
+  `;
+
+  const { root } = openViewOverlay({
+    title: patient.nombre || 'Paciente',
+    subtitle: 'Ficha del paciente',
+    bodyHtml,
+    actions: [
+      { label: 'Editar', cls: 'btn-primary', onClick: (close) => { close(); openPatientModal(id); } },
+    ],
+  });
+
+  hydrateAvatar(root.querySelector('.pf-avatar-preview'), patient);
+  root.querySelectorAll('[data-pv-view-policy]').forEach(el =>
+    el.addEventListener('click', () => {
+      const pol = policies.find(x => x.id === el.dataset.pvViewPolicy);
+      if (pol?.imagen) openAttachmentViewer(pol.imagen);
+    }));
 }
 
 function openPatientModal(id) {
