@@ -523,7 +523,8 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .file-preview { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:8px 12px; margin-top:8px; }
 .fp-icon { display:flex; flex-shrink:0; }
 .fp-icon svg { width:22px; height:22px; color:var(--t-primary-lt); }
-.fp-name { font-size:12.5px; font-weight:500; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.fp-name { font-size:12.5px; font-weight:500; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; cursor:pointer; }
+.fp-name:hover { color:var(--t-primary-lt); text-decoration:underline; }
 .fp-remove { cursor:pointer; color:var(--red-lt); flex-shrink:0; display:flex; }
 .fp-remove svg { width:14px; height:14px; }
 .info-box { background:var(--t-primary-dim); border:1px solid var(--t-border); border-radius:8px; padding:12px 14px; display:flex; gap:9px; font-size:12.5px; color:var(--ts); line-height:1.5; }

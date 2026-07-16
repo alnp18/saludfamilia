@@ -1,5 +1,6 @@
 import { state } from '../state.js';
 import * as api from '../lib/api.js';
+import * as files from '../lib/files.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 
@@ -9,6 +10,7 @@ const STAGE_LABELS = { A: 'Orden', B: 'Solicitud', C: 'Autorización', D: 'Cita'
 
 let activeFilter = 'all';
 let orderFiles = { orden: null, solicitud: null, autorizacion: null };
+let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
 
 export function setPendingOptions(opts) { pendingOptions = opts; }
@@ -127,7 +129,12 @@ function renderOrderCard(o, docMap) {
 
 async function deleteOrderConfirm(id) {
   if (!confirm('¿Eliminar esta orden médica? Se perderá todo su seguimiento.')) return;
+  // Recoger las rutas de adjuntos ANTES de borrar la fila, para limpiar
+  // el Storage después (mejor esfuerzo).
+  let paths = [];
+  try { paths = files.attachmentPathsOfOrder(await api.getOrder(id)); } catch { /* sin limpieza */ }
   await api.deleteOrder(id);
+  files.removeAttachments(paths);
   showToast('Orden eliminada', 'warn');
   render();
 }
@@ -144,8 +151,12 @@ function readFileAsDataURL(file) {
 async function handleFileInput(inputEl, slot) {
   const file = inputEl.files[0];
   if (!file) return;
-  if (file.size > 4 * 1024 * 1024) { showToast('Archivo muy grande (máx. 4MB)', 'err'); return; }
+  if (file.size > files.MAX_FILE_MB * 1024 * 1024) {
+    showToast(`Archivo muy grande (máx. ${files.MAX_FILE_MB}MB)`, 'err');
+    return;
+  }
   const dataUrl = await readFileAsDataURL(file);
+  // En memoria hasta guardar la orden: recién ahí se sube a Storage.
   orderFiles[slot] = { name: file.name, type: file.type, data: dataUrl };
   renderFilePreview(slot);
 }
@@ -155,17 +166,28 @@ function renderFilePreview(slot) {
   const f = orderFiles[slot];
   if (!el) return;
   if (!f) { el.innerHTML = ''; return; }
-  const isImg = f.type.startsWith('image/');
+  const isImg = (f.type || '').startsWith('image/');
   el.innerHTML = `<div class="file-preview">
-    ${isImg ? `<img src="${f.data}" style="width:32px;height:32px;object-fit:cover;border-radius:4px"/>` : `<div class="fp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg></div>`}
-    <div class="fp-name">${esc(f.name)}</div>
+    ${isImg ? `<img id="fp-img-${slot}" ${f.data ? `src="${f.data}"` : ''} style="width:32px;height:32px;object-fit:cover;border-radius:4px"/>` : `<div class="fp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg></div>`}
+    <div class="fp-name" data-open-slot="${slot}" title="Ver archivo">${esc(f.name)}</div>
     <span class="fp-remove" data-remove-slot="${slot}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
   </div>`;
+  // Miniatura de un adjunto ya en Storage: URL firmada (asíncrona).
+  if (isImg && !f.data && files.isStored(f)) {
+    files.getSignedUrl(f.path).then(url => {
+      const img = document.getElementById(`fp-img-${slot}`);
+      if (img) img.src = url;
+    }).catch(() => {});
+  }
+  el.querySelector('[data-open-slot]')?.addEventListener('click', () =>
+    files.openAttachment(orderFiles[slot]).catch(err =>
+      showToast(err.message || 'No se pudo abrir el archivo', 'err')));
   el.querySelector('[data-remove-slot]')?.addEventListener('click', () => { orderFiles[slot] = null; renderFilePreview(slot); });
 }
 
 async function openOrderWizard(id) {
   orderFiles = { orden: null, solicitud: null, autorizacion: null };
+  originalStoredPaths = [];
 
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
@@ -177,6 +199,7 @@ async function openOrderWizard(id) {
     if (o.orden_archivo) orderFiles.orden = o.orden_archivo;
     if (o.solicitud_imagen) orderFiles.solicitud = o.solicitud_imagen;
     if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
+    originalStoredPaths = files.attachmentPathsOfOrder(o);
   }
 
   const docOptions = doctors.map(d => `<option value="${d.id}" ${o?.medicoId === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
@@ -287,6 +310,22 @@ function switchWizTab(t) {
   document.getElementById(`pane-${t}`).classList.add('visible');
 }
 
+// Slot del wizard → campo jsonb de la orden
+const FILE_SLOTS = { orden: 'orden_archivo', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
+
+/**
+ * Sube a Storage los adjuntos recién elegidos (los que aún tienen `data`
+ * en memoria) y deja en `obj` el formato persistible {name,type,size,path}.
+ */
+async function uploadNewAttachments(obj, orderId) {
+  for (const [slot, field] of Object.entries(FILE_SLOTS)) {
+    const f = orderFiles[slot];
+    if (f && f.data && !files.isStored(f)) {
+      obj[field] = await files.uploadAttachment(state.household.id, orderId, slot, f);
+    }
+  }
+}
+
 async function saveOrderForm(editId) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
@@ -319,7 +358,30 @@ async function saveOrderForm(editId) {
   if (!obj.tipoOrden) { showToast('Selecciona el tipo de orden', 'err'); switchWizTab('a'); return; }
 
   try {
-    await api.saveOrder(obj, state.household.id, state.activePatient.id);
+    let saved;
+    if (editId) {
+      await uploadNewAttachments(obj, editId);
+      saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
+    } else {
+      // Orden nueva: se necesita su id para la ruta en Storage. Se crea
+      // primero (con los adjuntos aún fuera), se suben, y se actualiza.
+      const hasNewFiles = Object.values(orderFiles).some(f => f && f.data && !files.isStored(f));
+      if (hasNewFiles) {
+        const draft = { ...obj, orden_archivo: null, solicitud_imagen: null, auth_imagen: null };
+        saved = await api.saveOrder(draft, state.household.id, state.activePatient.id);
+        obj.id = saved.id;
+        await uploadNewAttachments(obj, saved.id);
+        saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
+      } else {
+        saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
+      }
+    }
+
+    // Limpiar del Storage los adjuntos que quedaron fuera (reemplazados o
+    // quitados en esta edición). Mejor esfuerzo, después de guardar.
+    const keptPaths = files.attachmentPathsOfOrder(saved);
+    files.removeAttachments(originalStoredPaths.filter(p => !keptPaths.includes(p)));
+
     closeModal();
     showToast(editId ? 'Orden actualizada' : 'Orden creada correctamente');
     render();

@@ -1,4 +1,5 @@
 import * as api from './api.js';
+import * as files from './files.js';
 
 /**
  * Exportar / Importar pacientes entre familias, como archivo cifrado que se
@@ -99,6 +100,18 @@ export async function decryptEnvelope(envelope, password) {
 // Armar la exportación (lee vía API → RLS del household actual)
 // ─────────────────────────────────────────
 /**
+ * Devuelve el adjunto con su contenido embebido en base64. Los que viven
+ * en Storage (formato {path}) se descargan primero: el archivo exportado
+ * debe ser autocontenido, sin depender del bucket de la familia origen.
+ */
+async function embedAttachment(att) {
+  if (files.isStored(att)) {
+    return { name: att.name, type: att.type, data: await files.downloadAsDataUrl(att.path) };
+  }
+  return att || null; // formato viejo (ya embebido) o sin adjunto
+}
+
+/**
  * Reúne los datos de los pacientes seleccionados, más los médicos y centros
  * referenciados por sus órdenes (solo los referenciados: al importar no se
  * arrastra el directorio completo a la familia destino).
@@ -114,7 +127,15 @@ export async function buildExportPayload(householdId, householdName, selectedPat
       api.listMedsByPatient(p.id),
       api.listVitalsByPatient(p.id),
     ]);
-    orders.push(...po.map(o => ({ ...o, patientId: p.id })));
+    for (const o of po) {
+      orders.push({
+        ...o,
+        patientId: p.id,
+        orden_archivo: await embedAttachment(o.orden_archivo),
+        solicitud_imagen: await embedAttachment(o.solicitud_imagen),
+        auth_imagen: await embedAttachment(o.auth_imagen),
+      });
+    }
     meds.push(...pm);
     vitals.push(...pv);
   }
@@ -196,15 +217,33 @@ export async function importPayload(payload, householdId, onProgress = () => {})
   }
 
   onProgress('Importando órdenes médicas…');
+  // Los adjuntos vienen embebidos en el archivo (base64); acá se suben al
+  // Storage del household destino. Vale también para archivos exportados
+  // antes de la migración a Storage: importan igual y quedan en el bucket.
+  const SLOT_BY_FIELD = { orden_archivo: 'orden', solicitud_imagen: 'solicitud', auth_imagen: 'autorizacion' };
   for (const o of payload.orders || []) {
     const patientId = patientMap.get(o.patientId);
     if (!patientId) continue; // orden de un paciente no incluido: no debería pasar
-    await api.saveOrder({
+    const base = {
       ...o, id: undefined,
       medicoId: o.medicoId ? doctorMap.get(o.medicoId) || null : null,
       medicoId_cita: o.medicoId_cita ? doctorMap.get(o.medicoId_cita) || null : null,
       auth_centroId: o.auth_centroId ? centerMap.get(o.auth_centroId) || null : null,
-    }, householdId, patientId);
+      orden_archivo: null, solicitud_imagen: null, auth_imagen: null,
+    };
+    const saved = await api.saveOrder(base, householdId, patientId);
+    let hasFiles = false;
+    for (const [field, slot] of Object.entries(SLOT_BY_FIELD)) {
+      const att = o[field];
+      if (att && att.data) {
+        base[field] = await files.uploadAttachment(householdId, saved.id, slot, att);
+        hasFiles = true;
+      }
+    }
+    if (hasFiles) {
+      base.id = saved.id;
+      await api.saveOrder(base, householdId, patientId);
+    }
   }
 
   onProgress('Importando medicamentos…');
