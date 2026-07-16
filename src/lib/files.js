@@ -31,7 +31,15 @@ function sanitizeName(name) {
 
 function dataUrlToBlob(dataUrl) {
   const [head, b64] = String(dataUrl).split(',');
-  const mime = (head.match(/^data:([^;]+);base64$/) || [])[1] || 'application/octet-stream';
+  // El header puede traer parámetros extra entre el mime type y ";base64"
+  // — por ejemplo, el datauristring que genera jsPDF viene como
+  // "data:application/pdf;filename=generado.pdf;base64". Antes el regex
+  // exigía que ";base64" viniera pegado al mime type y fallaba en ese
+  // caso, dejando el Blob con type "application/octet-stream" — Supabase
+  // Storage usa el .type real del Blob (ignora la opción `contentType`
+  // cuando se sube un Blob) y el bucket rechazaba ese mime type. Ahora
+  // solo se toma lo que hay antes del primer ";" o ",".
+  const mime = (head.match(/^data:([^;,]+)/) || [])[1] || 'application/octet-stream';
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
