@@ -1,5 +1,6 @@
 import { ThemeEngine } from './lib/theme.js';
 import { initials, avatarColor } from './lib/utils.js';
+import { hydrateAvatar } from './lib/avatar.js';
 
 export const state = {
   user: null,        // sesión de Supabase Auth
@@ -41,10 +42,12 @@ export function updatePatientHeader() {
   const av = document.getElementById('ps-avatar');
   const name = document.getElementById('ps-name');
   if (!av || !name) return;
+  av.style.backgroundImage = '';
   if (state.activePatient) {
     av.textContent = initials(state.activePatient.nombre);
     av.style.background = avatarColor(state.activePatient.nombre);
     name.textContent = state.activePatient.nombre;
+    hydrateAvatar(av, state.activePatient);
   } else {
     av.textContent = '—';
     av.style.background = '#3d5475';

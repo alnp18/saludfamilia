@@ -6,6 +6,7 @@ import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, initials, avatarColor, calcAge } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
+import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/avatar.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -28,6 +29,13 @@ const PARENTESCO_OPTIONS = [
 let policyFormOpen = false;
 let pendingPolicyOtra = false;
 let pendingPolicyImage = null; // { name, type, data } en memoria hasta guardar
+
+// Foto de perfil del paciente (MI AUDITORIA #1). Igual que con las pólizas,
+// solo se puede subir en edición (se necesita el id del paciente para la
+// ruta en Storage) — en creación se avisa que se puede agregar después.
+let currentAvatarFoto = null;   // { name, type, size, path } ya guardado, o null
+let pendingAvatarImage = null;  // { name, type, data } recién elegido, sin subir
+let avatarRemoved = false;      // el usuario pidió quitar la foto actual
 
 export async function render() {
   const container = document.getElementById('view-patients');
@@ -68,7 +76,7 @@ export async function render() {
     const pGrad = pSpec ? pSpec['--theme-gradient'] : 'var(--t-gradient)';
     return `<div class="patient-card ${sel ? 'selected' : ''}" data-select-id="${p.id}" style="--t-gradient:${pGrad}">
       <div class="pc-top">
-        <div class="pc-avatar" style="background:${ac}">${initials(p.nombre)}</div>
+        <div class="pc-avatar" data-avatar-id="${p.id}" style="background:${ac}">${initials(p.nombre)}</div>
         <div style="flex:1;min-width:0">
           <div class="pc-name">${esc(p.nombre)}</div>
           <div class="pc-sub">${age != null ? age + ' años · ' : ''}${esc(p.tipoSangre || '')} ${esc(p.sexo || '')}</div>
@@ -89,6 +97,7 @@ export async function render() {
       </div>
     </div>`;
   }).join('');
+  hydrateAvatarsIn(grid, patients);
 
   grid.querySelectorAll('[data-select-id]').forEach(el => {
     el.addEventListener('click', async (e) => {
@@ -108,9 +117,16 @@ function openPatientModal(id) {
   policyFormOpen = false;
   pendingPolicyOtra = false;
   pendingPolicyImage = null;
+  currentAvatarFoto = null;
+  pendingAvatarImage = null;
+  avatarRemoved = false;
   showModal(
     editing ? 'Editar paciente' : 'Nuevo paciente',
     `<div class="form-body">
+      <div class="form-section-title" style="margin-top:0">Foto de perfil</div>
+      <div id="pf-avatar-section" style="margin-bottom:14px">
+        ${editing ? '' : '<p style="font-size:12.5px;color:var(--ts);margin:0">Podrás agregar una foto después de crear el paciente.</p>'}
+      </div>
       <div class="form-row cols-2">
         <div class="form-field"><label class="fl">Primer nombre *</label><input class="fi" id="pf-nombre1" type="text"/></div>
         <div class="form-field"><label class="fl">Segundo nombre</label><input class="fi" id="pf-nombre2" type="text"/></div>
@@ -190,8 +206,64 @@ function openPatientModal(id) {
   }
 }
 
+function avatarPreviewHtml(patient) {
+  const ac = avatarColor(patient?.nombre || '');
+  return `<div class="pf-avatar-preview" id="pf-avatar-preview" data-avatar-id="${patient?.id || ''}" style="background:${ac}">${initials(patient?.nombre || '')}</div>`;
+}
+
+async function renderAvatarSection(patient) {
+  const container = document.getElementById('pf-avatar-section');
+  if (!container) return;
+  const hasPhoto = !avatarRemoved && (pendingAvatarImage || currentAvatarFoto);
+  container.innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px">
+      ${avatarPreviewHtml(patient)}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;gap:6px">
+          <label class="btn btn-sm" for="pf-avatar-file" style="cursor:pointer">Subir foto</label>
+          <input id="pf-avatar-file" type="file" accept="image/*" style="display:none"/>
+          <button type="button" class="btn btn-sm btn-icon" id="pf-avatar-cam-btn" title="Tomar foto"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+          <input type="file" id="pf-avatar-cam" accept="image/*" capture="user" style="display:none"/>
+          ${hasPhoto ? '<button type="button" class="btn btn-sm" id="pf-avatar-remove-btn">Quitar foto</button>' : ''}
+        </div>
+        <span style="font-size:11.5px;color:var(--ts)">JPG o PNG, máx. ${10}MB</span>
+      </div>
+    </div>`;
+
+  if (pendingAvatarImage && !avatarRemoved) {
+    document.getElementById('pf-avatar-preview').style.backgroundImage = `url("${pendingAvatarImage.data}")`;
+    document.getElementById('pf-avatar-preview').style.backgroundSize = 'cover';
+    document.getElementById('pf-avatar-preview').style.backgroundPosition = 'center';
+    document.getElementById('pf-avatar-preview').textContent = '';
+  } else if (currentAvatarFoto && !avatarRemoved) {
+    hydrateAvatar(document.getElementById('pf-avatar-preview'), { id: patient.id, foto: currentAvatarFoto, nombre: patient.nombre });
+  }
+
+  const handleFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const processed = await files.processAvatarFile(file);
+    e.target.value = '';
+    if (processed) {
+      pendingAvatarImage = processed;
+      avatarRemoved = false;
+      renderAvatarSection(patient);
+    }
+  };
+  document.getElementById('pf-avatar-file').addEventListener('change', handleFile);
+  document.getElementById('pf-avatar-cam').addEventListener('change', handleFile);
+  document.getElementById('pf-avatar-cam-btn').addEventListener('click', () => document.getElementById('pf-avatar-cam').click());
+  document.getElementById('pf-avatar-remove-btn')?.addEventListener('click', () => {
+    pendingAvatarImage = null;
+    avatarRemoved = true;
+    renderAvatarSection(patient);
+  });
+}
+
 async function fillPatientForm(id) {
   const p = await api.getPatient(id);
+  currentAvatarFoto = p.foto || null;
+  renderAvatarSection(p);
   document.getElementById('pf-nombre1').value = p.primerNombre || '';
   document.getElementById('pf-nombre2').value = p.segundoNombre || '';
   document.getElementById('pf-apellido1').value = p.primerApellido || '';
@@ -241,6 +313,21 @@ async function savePatientForm(editId) {
     direccion: document.getElementById('pf-ce-direccion').value.trim(),
   } : null;
 
+  // Foto de perfil: si se eligió una nueva, se sube primero (necesita el id
+  // del paciente para la ruta en Storage, que ya existe porque el avatar
+  // solo puede editarse desde el modo edición). Si se quitó sin reemplazo,
+  // queda en null. Si no se tocó, se conserva la que ya tenía.
+  let foto = avatarRemoved ? null : currentAvatarFoto;
+  const oldFotoPath = currentAvatarFoto?.path;
+  if (pendingAvatarImage && editId) {
+    try {
+      foto = await files.uploadAttachment(state.household.id, editId, 'avatar', pendingAvatarImage);
+    } catch (err) {
+      showToast(err.message || 'Error al subir la foto', 'err');
+      return;
+    }
+  }
+
   const obj = {
     id: editId || undefined,
     primerNombre,
@@ -255,9 +342,16 @@ async function savePatientForm(editId) {
     direccion: document.getElementById('pf-direccion').value.trim(),
     contactoEmergencia,
     notas: document.getElementById('pf-notas').value.trim(),
+    foto,
   };
   try {
     const saved = await api.savePatient(obj, state.household.id);
+    // Si se reemplazó o se quitó la foto anterior, se borra del bucket
+    // recién ahora que el guardado del paciente ya tuvo éxito.
+    if (oldFotoPath && oldFotoPath !== foto?.path) {
+      invalidateAvatarCache(currentAvatarFoto);
+      files.removeAttachments([oldFotoPath]);
+    }
     closeModal();
     showToast(editId ? 'Paciente actualizado' : 'Paciente creado');
     if (!state.activePatient) await setActivePatientCb?.(saved);

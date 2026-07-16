@@ -540,6 +540,7 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .patient-card.selected { border-color:var(--t-primary); box-shadow:0 0 0 2px var(--t-primary-glow); }
 .pc-top { display:flex; align-items:center; gap:12px; padding-top:4px; }
 .pc-avatar { width:46px; height:46px; border-radius:12px; font-size:17px; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 10px rgba(0,0,0,.3); }
+.pf-avatar-preview { width:64px; height:64px; border-radius:50%; font-size:20px; font-weight:700; color:#fff; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 3px 10px rgba(0,0,0,.3); }
 .pc-name { font-size:15px; font-weight:700; }
 .pc-sub  { font-size:12px; color:var(--ts); margin-top:3px; }
 .pc-actions { display:flex; gap:4px; margin-left:auto; }

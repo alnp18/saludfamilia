@@ -36,6 +36,10 @@ export function rowToPatient(r) {
     // dirección, ciudad) — ver P1.5. Puede venir null si nunca se llenó.
     contactoEmergencia: r.contacto_emergencia,
     notas: r.notas,
+    // Foto del paciente (MI AUDITORIA #1) — mismo formato que patient_policies.imagen
+    // ({name,type,size,path} en Storage), pero se muestra tal cual: nunca se
+    // convierte a PDF (ver processAvatarFile en files.js).
+    foto: r.foto,
     // Columna legada: ya no se lee/escribe desde la UI (ver P1.5 — el modo
     // claro/oscuro es ahora un único control general en el header, nunca una
     // preferencia por paciente). Se mantiene el mapeo por compatibilidad con
@@ -89,6 +93,7 @@ export function patientToRow(p, householdId) {
     direccion: p.direccion || null,
     contacto_emergencia: contactoEmergencia,
     notas: p.notas || null,
+    foto: p.foto || null,
     light_mode: false, // deprecado (ver P1.5); columna conservada por compatibilidad
   };
 }

@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
 import { esc, initials, avatarColor, fmtDate, today, daysFrom, calcAge } from '../lib/utils.js';
+import { hydrateAvatar } from '../lib/avatar.js';
 
 let calYear, calMonth;
 let clockTimer = null;
@@ -160,7 +161,7 @@ export async function render() {
 
   container.innerHTML = `
     <div class="dpb" id="dash-patient-bar">
-      <div class="dpb-avatar" style="background:${dpbGrad};font-size:22px;">${initials(patient.nombre)}</div>
+      <div class="dpb-avatar" data-avatar-id="${patient.id}" style="background:${dpbGrad};font-size:22px;">${initials(patient.nombre)}</div>
       <div>
         <div class="dpb-title">Hola · ${esc(patient.primerNombre || patient.nombre.split(' ')[0])}</div>
         <div class="dpb-sub">${esc(patient.nombre)}</div>
@@ -261,6 +262,7 @@ export async function render() {
 
   startClock();
   renderMiniCal();
+  hydrateAvatar(document.getElementById('dash-patient-bar')?.querySelector('[data-avatar-id]'), patient);
 
   container.querySelectorAll('[data-goto]').forEach(el =>
     el.addEventListener('click', () => goViewCb?.(el.dataset.goto)));

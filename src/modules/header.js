@@ -2,6 +2,7 @@ import { state, applyPatientTheme, persistLightMode } from '../state.js';
 import * as api from '../lib/api.js';
 import * as auth from '../lib/auth.js';
 import { esc, initials, avatarColor } from '../lib/utils.js';
+import { hydrateAvatarsIn } from '../lib/avatar.js';
 
 let dropOpen = false;
 let navOpen = false;
@@ -61,7 +62,7 @@ async function togglePatientDrop() {
       const ac = avatarColor(p.nombre);
       const cur = state.activePatient?.id === p.id ? 'current' : '';
       html += `<div class="pdrop-item ${cur}" data-select-id="${p.id}">
-        <div style="background:${ac};width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${initials(p.nombre)}</div>
+        <div data-avatar-id="${p.id}" style="background:${ac};width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${initials(p.nombre)}</div>
         <div><div style="font-size:13.5px;font-weight:600">${esc(p.nombre)}</div><div style="font-size:11px;color:var(--ts)">${esc(p.eps || 'Sin EPS registrada')}</div></div>
         ${cur ? '<svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" style="color:var(--t-primary-lt);margin-left:auto"><path stroke-linecap="round" d="M5 13l4 4L19 7"/></svg>' : ''}
       </div>`;
@@ -72,6 +73,7 @@ async function togglePatientDrop() {
   html += `<div class="pdrop-sep"></div><div class="pdrop-action" id="pdrop-manage">Gestionar pacientes</div>`;
   drop.innerHTML = html;
   drop.classList.add('open');
+  hydrateAvatarsIn(drop, patients);
 
   drop.querySelectorAll('[data-select-id]').forEach(el => el.addEventListener('click', async () => {
     const p = patients.find(x => x.id === el.dataset.selectId);
