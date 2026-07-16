@@ -2,12 +2,16 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc } from '../lib/utils.js';
+import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
 
 const SP_COLORS_MAP = {
   'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
   'Pediatría': '#047857', 'Ortopedia': '#1d4ed8', 'Ginecología': '#be185d',
   'Medicina Interna': '#0369a1', 'Radiología': '#c2410c', 'Laboratorio': '#047857',
 };
+// Reutilizada por Órdenes (selector "Médico tratante") para el mini-formulario
+// de alta rápida de médico sin salir del asistente de la orden.
+export const SPECIALTIES = Object.keys(SP_COLORS_MAP);
 
 export async function render() {
   const container = document.getElementById('view-doctors');
@@ -81,11 +85,16 @@ async function openDoctorModal(id) {
             <option value="Otra">Otra</option>
           </select>
         </div>
-        <div class="form-field"><label class="fl">Centro médico</label>
-          <select class="fi" id="df-centro">
-            <option value="">Sin centro asignado</option>
-            ${centers.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}
-          </select>
+        <div class="form-field">
+          <label class="fl">Centro médico</label>
+          <div style="display:flex;gap:6px">
+            <select class="fi" id="df-centro" style="flex:1">
+              <option value="">Sin centro asignado</option>
+              ${centers.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('')}
+            </select>
+            <button type="button" class="btn btn-sm btn-icon" id="df-centro-add-btn" title="Agregar centro médico al directorio">+</button>
+          </div>
+          <div id="df-centro-newform" class="hidden"></div>
         </div>
         <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301"/></div>
         <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="df-tel" type="tel" placeholder="Número directo o extensión"/></div>
@@ -97,6 +106,7 @@ async function openDoctorModal(id) {
       { label: id ? 'Guardar cambios' : 'Agregar médico', cls: 'btn btn-primary', action: () => saveDoctorForm(id) },
     ]
   );
+  wireInlineNewCenter('df-centro', 'df-centro-add-btn', 'df-centro-newform');
   if (id) api.getDoctor(id).then(d => {
     document.getElementById('df-nombre').value = d.nombre || '';
     document.getElementById('df-esp').value = d.especialidad || '';

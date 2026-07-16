@@ -94,6 +94,40 @@ export function attachmentPathsOfOrder(order) {
     .map(a => a.path);
 }
 
+function loadImage(dataUrl) {
+  return new Promise((res, rej) => {
+    const img = new Image();
+    img.onload = () => res(img);
+    img.onerror = () => rej(new Error('No se pudo leer la imagen'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Convierte una imagen (data-URL) en un PDF de una sola página (carta,
+ * imagen centrada y ajustada con márgenes). Se usa en la sección "Historia
+ * clínica" de la orden (P1.5): el usuario puede subir una foto directamente
+ * y queda guardada como PDF, igual que si hubiera subido uno ya existente.
+ */
+export async function imageToPdfDataUrl(dataUrl) {
+  // Carga perezosa: jsPDF (+ sus dependencias de compresión/decodificación
+  // PNG) solo se descarga si de verdad se sube una foto para este campo —
+  // la mayoría de las órdenes suben un PDF ya existente y nunca la necesitan.
+  const [{ jsPDF }, img] = await Promise.all([import('jspdf'), loadImage(dataUrl)]);
+  const orientation = img.width > img.height ? 'landscape' : 'portrait';
+  const doc = new jsPDF({ orientation, unit: 'pt', format: 'letter' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 24;
+  const maxW = pageW - margin * 2, maxH = pageH - margin * 2;
+  const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+  const w = img.width * ratio, h = img.height * ratio;
+  const x = (pageW - w) / 2, y = (pageH - h) / 2;
+  const format = (/^data:image\/(\w+);/.exec(dataUrl)?.[1] || 'jpeg').toUpperCase();
+  doc.addImage(dataUrl, format === 'JPG' ? 'JPEG' : format, x, y, w, h);
+  return doc.output('datauristring');
+}
+
 /**
  * Abre un adjunto en una pestaña nueva: con URL firmada si vive en
  * Storage, o vía blob temporal si es del formato viejo (base64).
