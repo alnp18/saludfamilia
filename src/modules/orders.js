@@ -3,6 +3,7 @@ import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
+import { openViewOverlay, closeViewOverlay } from '../lib/viewModeOverlay.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
@@ -241,11 +242,31 @@ function roField(label, valueHtml) {
   return `<div class="ro-field"><div class="ro-label">${label}</div><div class="ro-value">${valueHtml ?? '<span class="ro-empty">—</span>'}</div></div>`;
 }
 
+/** Sección "pendiente" (etapa aún sin datos). `stageLetter` es la etapa que
+ * representa esta sección (B/C/D); si coincide con la PRÓXIMA etapa a
+ * tramitar (la inmediatamente después de la ya alcanzada), se agrega un
+ * botón "Actualizar" — MI AUDITORIA Órdenes #3c — para abrir el asistente
+ * directamente en esa pestaña. Las etapas más allá de la próxima quedan
+ * sin botón: no tiene sentido saltarlas antes de completar la anterior. */
+function pendingSectionHtml(stageLetter, title, message, nextStage) {
+  const showUpdateBtn = stageLetter === nextStage;
+  return `<div class="ro-section ro-pending">
+    <div class="ro-section-title">${title}</div>
+    <p class="ro-empty-msg">${message}</p>
+    ${showUpdateBtn ? `<button type="button" class="btn btn-sm btn-primary" data-pv-update-stage="${TAB_BY_STAGE[stageLetter]}">Actualizar</button>` : ''}
+  </div>`;
+}
+
 function renderOrderReadView(o, docMap, centerMap) {
   const doc = docMap[o.medicoId];
   const docCita = docMap[o.medicoId_cita];
   const centro = centerMap[o.auth_centroId];
   const stageIdx = STAGE_ORDER.indexOf(o._stage);
+  // Próxima etapa a tramitar: la que sigue a la ya alcanzada. Si ya se
+  // llegó a "Cita" (o a Finalizado), no hay una próxima pestaña del
+  // asistente a la que saltar — se marca Finalizado desde la propia
+  // pestaña D, no con un botón "Actualizar" aparte.
+  const nextStage = stageIdx >= 0 && stageIdx < 3 ? STAGE_ORDER[stageIdx + 1] : null;
 
   const seccionA = `<div class="ro-section">
     <div class="ro-section-title">A · Orden</div>
@@ -262,7 +283,7 @@ function renderOrderReadView(o, docMap, centerMap) {
     ${roField('Hora', o.solicitud_hora ? esc(o.solicitud_hora) : null)}
     ${roField('Número de solicitud', o.solicitud_numero ? esc(o.solicitud_numero) : null)}
     ${o.solicitud_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="solicitud">Ver imagen</button>` : ''}
-  </div>` : `<div class="ro-section ro-pending"><div class="ro-section-title">B · Solicitud</div><p class="ro-empty-msg">Aún no se ha tramitado la solicitud.</p></div>`;
+  </div>` : pendingSectionHtml('B', 'B · Solicitud', 'Aún no se ha tramitado la solicitud.', nextStage);
 
   const seccionC = stageIdx >= 2 ? `<div class="ro-section">
     <div class="ro-section-title">C · Autorización</div>
@@ -273,7 +294,7 @@ function renderOrderReadView(o, docMap, centerMap) {
     ${centro && (centro.tel1 || centro.tel2) ? roField('Teléfono', [centro.tel1, centro.tel2].filter(Boolean).map(esc).join(' · ')) : ''}
     ${centro && centro.dir ? roField('Dirección', esc(centro.dir)) : ''}
     ${o.auth_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="autorizacion">Ver imagen</button>` : ''}
-  </div>` : `<div class="ro-section ro-pending"><div class="ro-section-title">C · Autorización</div><p class="ro-empty-msg">Aún no hay autorización registrada.</p></div>`;
+  </div>` : pendingSectionHtml('C', 'C · Autorización', 'Aún no hay autorización registrada.', nextStage);
 
   const seccionD = stageIdx >= 3 ? `<div class="ro-section">
     <div class="ro-section-title">D · Cita ${o._stage === 'Finalizado' ? '<span class="tag tag-green" style="margin-left:6px">Finalizada</span>' : ''}</div>
@@ -283,13 +304,16 @@ function renderOrderReadView(o, docMap, centerMap) {
     ${roField('Consultorio', o.cita_consultorio ? esc(o.cita_consultorio) : null)}
     ${roField('Dirección', o.cita_direccion ? esc(o.cita_direccion) : null)}
     ${roField('Indicaciones', o.cita_indicaciones ? esc(o.cita_indicaciones) : null)}
-  </div>` : `<div class="ro-section ro-pending"><div class="ro-section-title">D · Cita</div><p class="ro-empty-msg">Aún no hay cita programada.</p></div>`;
+  </div>` : pendingSectionHtml('D', 'D · Cita', 'Aún no hay cita programada.', nextStage);
 
   return `<div class="order-readview">${seccionA}${seccionB}${seccionC}${seccionD}</div>`;
 }
 
-/** Entrada por defecto al abrir una orden ya existente: solo lectura. La
- * edición es una acción explícita ("Editar"), nunca el estado inicial. */
+/** Entrada por defecto al abrir una orden ya existente: solo lectura, en
+ * ventana sobrepuesta con barra fija (Editar al lado de Cerrar, nunca se
+ * mueve al hacer scroll — MI AUDITORIA Órdenes #3a/#3b, mismo helper que
+ * el Modo vista de Pacientes). La edición sigue siendo una acción
+ * explícita, nunca el estado inicial. */
 async function openOrderModal(id) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
@@ -298,16 +322,27 @@ async function openOrderModal(id) {
   ]);
   const docMap = Object.fromEntries(doctors.map(d => [d.id, d]));
   const centerMap = Object.fromEntries(centers.map(c => [c.id, c]));
+  const doc = docMap[o.medicoId];
 
-  showModal('Orden médica', renderOrderReadView(o, docMap, centerMap), [
-    { label: 'Cerrar', cls: 'btn', action: closeModal },
-    { label: 'Editar', cls: 'btn btn-primary', action: () => openOrderWizard(id) },
-  ]);
-  setModalMaxWidth('680px');
+  const { root } = openViewOverlay({
+    title: o.tipoOrden || 'Orden médica',
+    subtitle: [doc?.nombre, o.descripcion].filter(Boolean).join(' · ') || 'Orden médica',
+    bodyHtml: renderOrderReadView(o, docMap, centerMap),
+    actions: [
+      { label: 'Editar', cls: 'btn-primary', onClick: (close) => { close(); openOrderWizard(id); } },
+    ],
+  });
 
-  document.querySelectorAll('[data-view-file]').forEach(btn => btn.addEventListener('click', () => {
+  root.querySelectorAll('[data-view-file]').forEach(btn => btn.addEventListener('click', () => {
     const field = FILE_SLOTS[btn.dataset.viewFile];
     openAttachmentViewer(o[field]);
+  }));
+  // MI AUDITORIA Órdenes #3c: "Actualizar" cierra el modo vista y abre el
+  // asistente directo en la próxima etapa pendiente (no en la etapa ya
+  // alcanzada, como hace "Editar").
+  root.querySelectorAll('[data-pv-update-stage]').forEach(btn => btn.addEventListener('click', () => {
+    closeViewOverlay();
+    openOrderWizard(id, undefined, btn.dataset.pvUpdateStage);
   }));
 }
 
@@ -376,8 +411,11 @@ function wireFileSlot(slot) {
 
 /** Abre el asistente de edición. `id` ausente = orden nueva (sin
  * restricciones de navegación entre etapas). `prefill` — ver estado
- * "Finalizado" en la sección D, para la orden de seguimiento. */
-async function openOrderWizard(id, prefill) {
+ * "Finalizado" en la sección D, para la orden de seguimiento. `forceTab`
+ * (MI AUDITORIA Órdenes #3c, botón "Actualizar") abre directo en esa
+ * pestaña en vez de en la etapa ya alcanzada — siempre hacia adelante,
+ * así que nunca dispara el aviso de "etapa anterior" de switchWizTab. */
+async function openOrderWizard(id, prefill, forceTab) {
   orderFiles = { orden: null, solicitud: null, autorizacion: null };
   originalStoredPaths = [];
   currentOrderStageIdx = -1;
@@ -526,6 +564,8 @@ async function openOrderWizard(id, prefill) {
     if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
   }
   renderFilePreview('orden'); renderFilePreview('solicitud'); renderFilePreview('autorizacion');
+
+  if (forceTab && forceTab !== startTab) switchWizTab(forceTab);
 }
 
 /** Las etapas se navegan como páginas. Editar una etapa anterior a la ya
