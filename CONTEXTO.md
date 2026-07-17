@@ -4,9 +4,11 @@ _Última actualización: 2026-07-17 (P1.5 completa + P2 100% completa +
 backlog "MI AUDITORIA" + segunda auditoría de Ficha de paciente + tercera
 auditoría de Medicamentos + cuarta auditoría de Signos Vitales (hora de
 toma, edad automática, peso gramos/kg por edad, altura/longitud tibial,
-frecuencia respiratoria y perímetro cefálico) + **cierre de esta tanda**:
-reinicio completo de datos de prueba en producción y verificación final
-de que todo lo anterior está desplegado y en línea)_
+frecuencia respiratoria y perímetro cefálico) + cierre de esa tanda con
+reinicio de datos de prueba + **pieza A de arquitectura COMPLETADA**:
+directorio público auditado de médicos y centros, migración 0020 aplicada
+y verificada, vista nueva "Directorio público". Con esto **no queda ningún
+frente pendiente del plan**)_
 
 ## Qué es
 
@@ -66,8 +68,13 @@ frente, con prioridad y agente recomendado, está en
     verificación final de despliegue — COMPLETADO** el 2026-07-17. Con
     esto la app queda en un estado limpio y verificado, lista para uso
     real (no solo de prueba). Detalle en la sección dedicada abajo.
-12. Pieza A de arquitectura (directorio público auditado de médicos y
-    centros), diseñada a alto nivel pero sin implementar (Fable).
+12. ✅ **Pieza A de arquitectura (directorio público auditado de médicos
+    y centros) — COMPLETADA** el 2026-07-17 (Fable): diseño detallado
+    cerrado con el usuario, migración `0020` aplicada a producción tras
+    24/24 pruebas RLS en transacción con rollback, y vista nueva
+    "Directorio público" con flujo proponer → revisar → publicar →
+    copiar. Detalle en la sección dedicada abajo. Era el último frente
+    pendiente del plan.
 13. Cinco ideas de crecimiento futuro relevadas por la usuaria (sección
     de vacunación, hospitalización, seguimiento de embarazo, odontología,
     roles administrador/médico) — **explícitamente diferidas**, ver
@@ -99,7 +106,10 @@ saludfamilia/
 │       ├── 0016_patient_diagnoses_update_rls.sql ← 2ª auditoría (editar diagnósticos)
 │       ├── 0017_medicamentos_indicacion_controlado_usos.sql ← auditoría Medicamentos
 │       ├── 0018_vital_signs_auditoria.sql       ← auditoría Signos Vitales
-│       └── 0019_vital_signs_perimetro_cefalico.sql ← perímetro cefálico (lactantes)
+│       ├── 0019_vital_signs_perimetro_cefalico.sql ← perímetro cefálico (lactantes)
+│       └── 0020_directorio_publico.sql          ← pieza A: app_admins,
+│                                                   public_doctors/centers,
+│                                                   RLS + procedencia de copias
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
@@ -130,7 +140,10 @@ saludfamilia/
 │   │   └── utils.js
 │   ├── modules/                ← incluye header.js y family.js; orders.js
 │   │                             agrupa además la pestaña Flujo (línea de
-│   │                             tiempo, MI AUDITORIA Órdenes #5)
+│   │                             tiempo, MI AUDITORIA Órdenes #5);
+│   │                             directory.js es la vista "Directorio
+│   │                             público" (pieza A: pestañas Médicos /
+│   │                             Centros / Mis propuestas / Revisión)
 │   ├── state.js
 │   └── main.js                 ← auth screen + bootstrap + router
 ├── index.html / vite.config.js / vercel.json / package.json
@@ -139,7 +152,7 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, **19 migraciones** aplicadas (`0012`–`0015` del backlog
+  `ACTIVE_HEALTHY`, **20 migraciones** aplicadas (`0012`–`0015` del backlog
   MI AUDITORIA: avatar de paciente, aseguradora de pólizas, diagnósticos
   crónicos CIE10, y autorizaciones mes a mes de Órdenes; `0016` de la
   segunda auditoría: política RLS de UPDATE en `patient_diagnoses`; `0017`
@@ -148,7 +161,10 @@ saludfamilia/
   auditoría de Signos Vitales: columnas `hora`/`frecuencia_respiratoria`/
   `longitud_tibial` en `vital_signs` y `peso` ampliado a `numeric(6,3)`;
   `0019`: columna `per_cefalico` en `vital_signs` — perímetro cefálico de
-  lactantes).
+  lactantes; `0020` de la pieza A: tablas `app_admins`, `public_doctors` y
+  `public_centers` con RLS completa, función `private.is_app_admin()`,
+  trigger de auditoría de revisión, columna `public_source_id` en
+  `doctors`/`medical_centers`, y alta de alnp como administradora).
   **Ojo con la 0018**: en la tabla de migraciones de Supabase quedó
   registrada con el nombre `0005_vital_signs_auditoria` (se aplicó desde
   otra conversación que trabajaba sobre una copia local desactualizada). El
@@ -850,6 +866,88 @@ datos de prueba, y todo el código reciente verificado en producción —
 lista para uso real por la usuaria y su familia. Ver "Estado de los
 datos" arriba para el detalle numérico.
 
+## Pieza A — Directorio público auditado de médicos y centros (completada 2026-07-17)
+
+Último frente pendiente del plan, implementado por Fable con el diseño de
+alto nivel ya acordado y **cuatro decisiones de detalle cerradas con el
+usuario antes de empezar**: (1) diseño + implementación completa en la
+misma sesión; (2) la administradora del directorio es **la cuenta de alnp**
+(`app_admins` se administra solo por SQL, sin interfaz para nombrar
+admins); (3) las entradas llegan por **propuesta manual** desde el
+directorio privado + la admin puede **publicar directamente** sin pasar
+por revisión; (4) las copias guardan **referencia de origen**
+(`public_source_id`).
+
+**Modelo (migración `0020_directorio_publico.sql`):**
+
+- Tablas globales `public_doctors` / `public_centers` (separadas de las
+  privadas, que no cambian de modelo): campos espejo "compartibles" + un
+  ciclo de vida `estado` (`pendiente` → `publicado` | `rechazado`, con
+  `nota_revision`, y `revisado_por`/`revisado_en` que llena un **trigger
+  del servidor** al cambiar el estado — el cliente no puede omitirlo ni
+  falsificarlo). El centro de un médico público viaja como **texto**, no
+  FK: publicar un médico no obliga a publicar su centro.
+- `app_admins` (hoy: alnp) + `private.is_app_admin()` (SECURITY DEFINER
+  en el schema `private`, mismo criterio que `is_household_member`). El
+  cliente solo puede leer su propia fila (para decidir si muestra la
+  interfaz de revisión).
+- **RLS**: ver publicado (cualquier autenticado) / lo propio (la
+  proponente sigue sus estados y la nota de rechazo) / todo (admin);
+  insertar solo a nombre propio y solo `pendiente` (la admin también
+  `publicado` = alta directa); actualizar solo admin (la proponente NO
+  edita su propuesta: la retira y la vuelve a proponer); eliminar admin
+  siempre, la proponente solo sus pendientes (retirar) o rechazadas
+  (descartar para reintentar). `anon` sin ningún acceso (revocado — los
+  default privileges lo reintroducen en tablas nuevas).
+- **Procedencia**: `doctors.public_source_id` / `medical_centers.
+  public_source_id` (FK a la tabla pública, `on delete set null`: borrar
+  una entrada pública nunca toca las copias). En cambio,
+  `origen_privado_id` en las tablas públicas es **deliberadamente sin
+  FK** (una FK validaría contra filas de todas las familias — oráculo de
+  existencia de ids ajenos — y acoplaría el directorio al ciclo de vida
+  de datos privados).
+- **Verificación**: 24/24 pruebas RLS en una transacción con
+  `set local role` + JWT simulado + rollback ANTES de aplicar (tres
+  identidades reales + anon: proponer, suplantación bloqueada, edición
+  bloqueada, visibilidad de pendientes, aprobar con trigger, rechazo con
+  nota, retiro, copia con procedencia, FK inválida rechazada, regresión
+  de aislamiento privado, anon sin acceso, autonombrarse admin
+  bloqueado). Aplicada con `apply_migration` después.
+
+**Interfaz (commit de esta sesión):**
+
+- Vista nueva **"Directorio público"** en el grupo Directorios del
+  sidebar, con pestañas: **Médicos** y **Centros** (publicados, agrupados
+  por especialidad, botón **Copiar** o etiqueta "En tu directorio" si ya
+  se copió), **Mis propuestas** (estados con badge; retirar pendientes,
+  descartar rechazadas viendo la nota de la admin), y **Revisión** (solo
+  admin: aprobar / editar antes de aprobar / rechazar con nota; la admin
+  además tiene "Publicar médico/centro" para el alta directa).
+- En **Médicos** y **Centros médicos** privados: botón "Proponer al
+  directorio público" por tarjeta (con modal de confirmación que muestra
+  exactamente qué se envía; el centro vinculado viaja como texto), y
+  etiquetas "Del directorio" / "Propuesto" / "En el directorio". Un
+  registro copiado o ya propuesto (pendiente/publicado) no se puede
+  volver a proponer; uno rechazado sí.
+- **Copiar** crea la fila privada con `public_source_id`; si el texto del
+  centro coincide exactamente con un centro privado, se vincula
+  (`centro_id`); si no, queda sin vincular (el usuario edita la copia).
+- `exportImport.js`: al importar un `.sfam`, `publicSourceId` se
+  **descarta** (la procedencia no viaja entre familias; un id viejo podría
+  ya no existir y la FK rechazaría el insert). En `api.js`, la columna
+  solo se escribe cuando el llamador trae la clave — una edición normal
+  del formulario nunca pisa la procedencia.
+
+**Verificación de UI**: `npm run build` limpio + Playwright contra la app
+real servida por Vite con TODAS las llamadas a Supabase interceptadas
+(cero escrituras a producción): 12 capturas (claro/oscuro, usuaria normal
+y admin) + 5 asserts de visibilidad (pestaña Revisión y botón Publicar
+solo para admin; botón Proponer solo donde corresponde).
+
+**Pendiente natural (no bloqueante)**: E2E por UI en producción con las
+cuentas reales cuando alnp use el flujo por primera vez; si algún día se
+quiere otra admin, es un INSERT en `app_admins` por SQL.
+
 ## Ideas de crecimiento futuro (explícitamente diferidas, no en curso)
 
 La usuaria compartió cinco ideas para ampliar el proyecto, aclarando
@@ -864,9 +962,10 @@ implementación de ninguna sin que la usuaria lo pida de nuevo:**
 3. Interfaz completa de seguimiento de mujeres embarazadas.
 4. Interfaz completa de odontología y salud oral.
 5. Roles "administrador" (para curar el directorio público que se vaya
-   formando — se conecta con la Pieza A de arquitectura, ver abajo) y
+   formando — la parte de curación del directorio quedó CUBIERTA por la
+   pieza A, ver su sección: rol admin en `app_admins`, hoy alnp) y
    "médico" (para que médicos vean historias clínicas de pacientes que
-   se las compartan).
+   se las compartan — esta parte sigue diferida).
 
 ## Historial relevante de sesiones previas (resumen)
 
@@ -936,16 +1035,20 @@ implementación de ninguna sin que la usuaria lo pida de nuevo:**
     diferidas** por la usuaria (vacunación, hospitalización, seguimiento
     de embarazo, odontología, roles admin/médico). Ver sección dedicada
     arriba — no emprender sin pedido nuevo.
-18. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
-    directorio público auditado de médicos y centros.
+18. **Pieza A de arquitectura — COMPLETADA** el 2026-07-17 (migración
+    `0020` + vista "Directorio público"): directorio público auditado de
+    médicos y centros, con rol de administradora (alnp), flujo proponer →
+    revisar → publicar, copia al directorio privado con procedencia, y
+    24/24 pruebas RLS con rollback antes de aplicar. Con esto **se cierra
+    el último frente del plan**. Ver sección dedicada arriba.
 
 ## Criterio de asignación de agentes de Claude
 
 - **Fable** (máxima capacidad): seguridad RLS y migraciones de datos. Ya
   ejecutó: invitaciones (P1 #6), exportar/importar (pieza B), Storage
-  (P1 #7) y la auditoría RLS (P1 #8). Del plan actual solo le queda la
-  **pieza A (directorio público auditado)** y cualquier cambio futuro de
-  RLS/esquema.
+  (P1 #7), la auditoría RLS (P1 #8) y la **pieza A (directorio público
+  auditado, 2026-07-17)**. Sin ítems pendientes del plan; le corresponde
+  cualquier cambio futuro de RLS/esquema.
 - **Opus**: flujos que cruzan varios archivos y estados. Sin ítems
   pendientes por ahora.
 - **Sonnet**: tareas acotadas y mecánicas — configuración, UI, limpieza,
@@ -954,38 +1057,36 @@ implementación de ninguna sin que la usuaria lo pida de nuevo:**
 
 ## Próximos pasos sugeridos para quien retome
 
-Con P1.5, P2 (4/4), MI AUDITORIA y las cuatro auditorías adicionales de
-esta sesión completos y **desplegados en producción con datos limpios**,
-no queda ningún ítem numerado del plan original pendiente y la app está
-en condiciones de uso real. Lo que sigue es priorizar entre lo no
-planeado / de mantenimiento:
+Con P1.5, P2 (4/4), MI AUDITORIA, las cuatro auditorías adicionales y la
+**pieza A de arquitectura** completas, **no queda ningún frente del plan
+pendiente**: el plan de avance está cerrado y la app en condiciones de
+uso real. Lo que sigue es mantenimiento y lo que la usuaria pida:
 
-1. Uso real por la usuaria y su familia — la base ya no tiene datos de
-   prueba (ver "Estado de los datos" arriba), así que cualquier dato que
+1. Uso real por la usuaria y su familia — la base no tiene datos de
+   prueba (ver "Estado de los datos" arriba; las tablas nuevas del
+   directorio público también nacen vacías), así que cualquier dato que
    se cargue de ahora en más es real. Si en algún momento se quiere un
    E2E completo por UI (Avatar, Pólizas con aseguradora, Crónicos,
    Autorizaciones mes a mes, pestaña Flujo, Medicamentos, Signos Vitales
-   con perímetro cefálico) antes de confiar datos reales, hacerlo ahora
-   que la base está vacía — hasta hoy solo se verificó con capturas de
-   pantalla locales, no contra producción.
+   con perímetro cefálico, y ahora el ciclo completo del directorio:
+   proponer con dacn → aprobar con alnp → copiar con la tercera cuenta)
+   hacerlo antes de acumular datos reales — hasta hoy se verificó con
+   capturas locales y SQL, no por UI de producción.
 2. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
    una transacción con `rollback` (patrón usado con éxito en todos los
-   E2E de seguridad de este proyecto). Ojo: `is_household_member` ahora
-   vive en el schema `private`, y Supabase bloquea DELETEs directos sobre
-   `storage.objects` (usar la API de Storage).
-3. Las cinco ideas de crecimiento futuro relevadas por la usuaria
-   (vacunación, hospitalización, embarazo, odontología, roles
-   admin/médico) están **explícitamente diferidas** — no diseñar ni
-   implementar ninguna sin que la usuaria lo pida de nuevo. Ver sección
-   dedicada arriba.
-4. Pieza A de arquitectura (directorio público auditado) — diseño
-   detallado con Fable cuando se decida priorizarla. El usuario confirmó
-   que tiene sentido invertir en esto (espera más familias usando la
-   app), pero el diseño de detalle (mecanismo de rol admin, si se
-   rastrea la procedencia de copias del directorio público al privado)
-   quedó sin cerrar — retomar solo si el usuario lo pide de nuevo. Se
-   relaciona con la idea diferida #5 (rol "administrador").
+   E2E de seguridad de este proyecto, incluida la pieza A). Ojo:
+   `is_household_member` e `is_app_admin` viven en el schema `private`,
+   y Supabase bloquea DELETEs directos sobre `storage.objects` (usar la
+   API de Storage).
+3. Las ideas de crecimiento futuro relevadas por la usuaria (vacunación,
+   hospitalización, embarazo, odontología, rol "médico"; el rol
+   "administrador" de directorio ya quedó cubierto por la pieza A) están
+   **explícitamente diferidas** — no diseñar ni implementar ninguna sin
+   que la usuaria lo pida de nuevo. Ver sección dedicada arriba.
+4. Administración del directorio público: agregar/quitar administradoras
+   es un INSERT/DELETE en `app_admins` por SQL (decisión de diseño: sin
+   interfaz para eso). Hoy la única admin es alnp.
 5. Si algún día se pasa al plan Pro de Supabase: activar "Leaked
    password protection" (HaveIBeenPwned) en Auth — hoy rechazado por la
    API en el plan gratuito; el mínimo de contraseña ya se subió a 8.

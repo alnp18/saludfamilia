@@ -933,6 +933,19 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .doc-tarjeta { font-size:11px; color:var(--tm); font-family:'JetBrains Mono',monospace; margin-top:1px; }
 .doc-detail { font-size:11.5px; color:var(--ts); margin-top:2px; }
 
+/* ══ DIRECTORIO PÚBLICO (pieza A) ══ */
+/* Estado de una propuesta: pendiente / publicado / rechazado */
+.dir-status { display:inline-flex; align-items:center; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; border-radius:5px; padding:2px 7px; white-space:nowrap; flex-shrink:0; }
+.dir-status.pendiente { color:var(--amber-lt); background:var(--amber-dim); border:1px solid rgba(245,158,11,.25); }
+.dir-status.publicado { color:var(--green-lt); background:var(--green-dim); border:1px solid rgba(34,197,94,.25); }
+.dir-status.rechazado { color:var(--red-lt); background:var(--red-dim); border:1px solid rgba(239,68,68,.25); }
+/* Etiqueta chica en tarjetas: "Del directorio" / "Propuesto" / "En tu directorio" */
+.dir-mini-tag { display:inline-block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--t-primary-lt); background:var(--t-primary-dim); border:1px solid var(--t-border); border-radius:5px; padding:1px 6px; vertical-align:middle; white-space:nowrap; flex-shrink:0; }
+/* Fila de propuesta (Mis propuestas y Revisión) */
+.dir-proposal-row { display:flex; align-items:center; gap:12px; background:var(--card); border:1px solid var(--border); border-radius:var(--r-sm); padding:12px 14px; flex-wrap:wrap; }
+.dir-proposal-row:hover { border-color:var(--border-lt); }
+.dir-review-note { font-size:12px; color:var(--ts); font-style:italic; margin-top:3px; }
+
 body.patient-themed:not(.light-mode) { color-scheme: dark; }
 
 /* ══ AUTH SCREEN ══ */

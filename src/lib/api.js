@@ -257,14 +257,20 @@ function rowToCenter(r) {
   return {
     id: r.id, nombre: r.nombre, tel1: r.tel1, tel2: r.tel2,
     dir: r.direccion, email: r.email, web: r.web,
+    publicSourceId: r.public_source_id,
   };
 }
 function centerToRow(c, householdId) {
-  return {
+  const row = {
     household_id: householdId,
     nombre: c.nombre, tel1: c.tel1 || null, tel2: c.tel2 || null,
     direccion: c.dir || null, email: c.email || null, web: c.web || null,
   };
+  // Procedencia (pieza A): la columna solo se escribe si el llamador trae la
+  // clave — así una edición normal desde el formulario (que no la conoce) no
+  // pisa a null la referencia de una copia hecha desde el directorio público.
+  if ('publicSourceId' in c) row.public_source_id = c.publicSourceId || null;
+  return row;
 }
 
 export async function listCenters(householdId) {
@@ -302,16 +308,20 @@ function rowToDoctor(r) {
     id: r.id, nombre: r.nombre, especialidad: r.especialidad,
     centroId: r.centro_id, consultorio: r.consultorio, tel: r.telefono, notas: r.notas,
     tarjetaProfesional: r.tarjeta_profesional,
+    publicSourceId: r.public_source_id,
   };
 }
 function doctorToRow(d, householdId) {
-  return {
+  const row = {
     household_id: householdId,
     nombre: d.nombre, especialidad: d.especialidad || null,
     centro_id: d.centroId || null, consultorio: d.consultorio || null,
     telefono: d.tel || null, notas: d.notas || null,
     tarjeta_profesional: d.tarjetaProfesional || null,
   };
+  // Procedencia (pieza A) — mismo criterio que centerToRow.
+  if ('publicSourceId' in d) row.public_source_id = d.publicSourceId || null;
+  return row;
 }
 
 export async function listDoctors(householdId) {
@@ -338,6 +348,162 @@ export async function saveDoctor(doctor, householdId) {
 }
 export async function deleteDoctor(id) {
   const { error } = await supabase.from('doctors').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────
+// DIRECTORIO PÚBLICO (pieza A)
+// ─────────────────────────────────────────
+// Tablas globales public_doctors / public_centers, compartidas entre todas
+// las familias. La RLS (migración 0020) hace el trabajo pesado: cualquier
+// autenticado ve lo publicado y sus propias propuestas; solo la admin
+// (app_admins) ve pendientes ajenas, edita, aprueba, rechaza o elimina.
+// Acá no se filtra "por si acaso" nada que la RLS ya garantice.
+
+function rowToPublicDoctor(r) {
+  return {
+    id: r.id, nombre: r.nombre, especialidad: r.especialidad,
+    tarjetaProfesional: r.tarjeta_profesional, centro: r.centro,
+    consultorio: r.consultorio, tel: r.telefono, notas: r.notas,
+    estado: r.estado, propuestoPor: r.propuesto_por,
+    origenPrivadoId: r.origen_privado_id, notaRevision: r.nota_revision,
+    creadoEn: r.created_at,
+  };
+}
+function publicDoctorToRow(d) {
+  return {
+    nombre: d.nombre, especialidad: d.especialidad || null,
+    tarjeta_profesional: d.tarjetaProfesional || null,
+    centro: d.centro || null, consultorio: d.consultorio || null,
+    telefono: d.tel || null, notas: d.notas || null,
+  };
+}
+function rowToPublicCenter(r) {
+  return {
+    id: r.id, nombre: r.nombre, tel1: r.tel1, tel2: r.tel2,
+    dir: r.direccion, email: r.email, web: r.web,
+    estado: r.estado, propuestoPor: r.propuesto_por,
+    origenPrivadoId: r.origen_privado_id, notaRevision: r.nota_revision,
+    creadoEn: r.created_at,
+  };
+}
+function publicCenterToRow(c) {
+  return {
+    nombre: c.nombre, tel1: c.tel1 || null, tel2: c.tel2 || null,
+    direccion: c.dir || null, email: c.email || null, web: c.web || null,
+  };
+}
+
+/** ¿La cuenta actual es administradora del directorio? La RLS de app_admins
+ * solo deja ver la fila propia, así que basta con mirar si hay alguna. */
+export async function isDirectoryAdmin() {
+  const { data, error } = await supabase.from('app_admins').select('user_id').maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+export async function listPublicDoctors(estado) {
+  const { data, error } = await supabase.from('public_doctors').select('*')
+    .eq('estado', estado).order('nombre');
+  if (error) throw error;
+  return data.map(rowToPublicDoctor);
+}
+
+export async function listPublicCenters(estado) {
+  const { data, error } = await supabase.from('public_centers').select('*')
+    .eq('estado', estado).order('nombre');
+  if (error) throw error;
+  return data.map(rowToPublicCenter);
+}
+
+/** Propuestas de la cuenta actual (todas: pendientes, publicadas y
+ * rechazadas con su nota), para la pestaña "Mis propuestas" y para saber
+ * qué registros privados ya fueron propuestos. */
+export async function listMyProposals(userId) {
+  const [d, c] = await Promise.all([
+    supabase.from('public_doctors').select('*').eq('propuesto_por', userId)
+      .order('created_at', { ascending: false }),
+    supabase.from('public_centers').select('*').eq('propuesto_por', userId)
+      .order('created_at', { ascending: false }),
+  ]);
+  if (d.error) throw d.error;
+  if (c.error) throw c.error;
+  return { doctors: d.data.map(rowToPublicDoctor), centers: c.data.map(rowToPublicCenter) };
+}
+
+/** Proponer una entrada (queda 'pendiente' hasta que la admin la revise).
+ * origenPrivadoId enlaza con la fila privada de la que salió, para no
+ * ofrecer proponerla dos veces. */
+export async function proposePublicDoctor(d, userId) {
+  const { data, error } = await supabase.from('public_doctors')
+    .insert({ ...publicDoctorToRow(d), propuesto_por: userId, origen_privado_id: d.origenPrivadoId || null })
+    .select().single();
+  if (error) throw error;
+  return rowToPublicDoctor(data);
+}
+
+export async function proposePublicCenter(c, userId) {
+  const { data, error } = await supabase.from('public_centers')
+    .insert({ ...publicCenterToRow(c), propuesto_por: userId, origen_privado_id: c.origenPrivadoId || null })
+    .select().single();
+  if (error) throw error;
+  return rowToPublicCenter(data);
+}
+
+/** Solo admin (la RLS lo garantiza): crear una entrada ya publicada (alta
+ * directa) o editar los datos de una existente sin tocar su estado. */
+export async function savePublicDoctor(d, userId) {
+  if (d.id) {
+    const { data, error } = await supabase.from('public_doctors')
+      .update(publicDoctorToRow(d)).eq('id', d.id).select().single();
+    if (error) throw error;
+    return rowToPublicDoctor(data);
+  }
+  const { data, error } = await supabase.from('public_doctors')
+    .insert({ ...publicDoctorToRow(d), estado: 'publicado', propuesto_por: userId })
+    .select().single();
+  if (error) throw error;
+  return rowToPublicDoctor(data);
+}
+
+export async function savePublicCenter(c, userId) {
+  if (c.id) {
+    const { data, error } = await supabase.from('public_centers')
+      .update(publicCenterToRow(c)).eq('id', c.id).select().single();
+    if (error) throw error;
+    return rowToPublicCenter(data);
+  }
+  const { data, error } = await supabase.from('public_centers')
+    .insert({ ...publicCenterToRow(c), estado: 'publicado', propuesto_por: userId })
+    .select().single();
+  if (error) throw error;
+  return rowToPublicCenter(data);
+}
+
+/** Solo admin: aprobar ('publicado') o rechazar ('rechazado', con nota
+ * opcional que ve la proponente). Quién y cuándo revisó lo registra el
+ * trigger del servidor, no el cliente. */
+export async function setPublicDoctorEstado(id, estado, notaRevision) {
+  const { error } = await supabase.from('public_doctors')
+    .update({ estado, nota_revision: notaRevision || null }).eq('id', id);
+  if (error) throw error;
+}
+
+export async function setPublicCenterEstado(id, estado, notaRevision) {
+  const { error } = await supabase.from('public_centers')
+    .update({ estado, nota_revision: notaRevision || null }).eq('id', id);
+  if (error) throw error;
+}
+
+/** Admin: eliminar cualquiera. Proponente: retirar su pendiente o
+ * descartar su rechazada (la RLS impide todo lo demás). */
+export async function deletePublicDoctor(id) {
+  const { error } = await supabase.from('public_doctors').delete().eq('id', id);
+  if (error) throw error;
+}
+
+export async function deletePublicCenter(id) {
+  const { error } = await supabase.from('public_centers').delete().eq('id', id);
   if (error) throw error;
 }
 

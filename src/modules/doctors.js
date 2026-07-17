@@ -34,11 +34,15 @@ export async function render() {
   document.getElementById('btn-new-doctor').addEventListener('click', () => openDoctorModal());
 
   const el = document.getElementById('doctors-content');
-  let docs, centers;
+  let docs, centers, mine;
   try {
-    [docs, centers] = await Promise.all([
+    [docs, centers, mine] = await Promise.all([
       api.listDoctors(state.household.id),
       api.listCenters(state.household.id),
+      // Propuestas propias al directorio público (pieza A): sirven solo para
+      // decidir qué tarjeta ya está propuesta/publicada. Si falla, no debe
+      // tumbar la vista — se degrada a "sin información de propuestas".
+      api.listMyProposals(state.user.id).catch(() => ({ doctors: [], centers: [] })),
     ]);
   } catch (err) {
     showToast(err.message || 'No se pudieron cargar los médicos', 'err');
@@ -47,6 +51,12 @@ export async function render() {
     return;
   }
   const centerMap = Object.fromEntries(centers.map(c => [c.id, c.nombre]));
+  // Estado de propuesta por registro privado (pendiente/publicado bloquean
+  // volver a proponer; un rechazo NO — se puede corregir y reintentar).
+  const proposedMap = {};
+  mine.doctors.forEach(p => {
+    if (p.origenPrivadoId && p.estado !== 'rechazado') proposedMap[p.origenPrivadoId] = p.estado;
+  });
 
   if (!docs.length) {
     el.innerHTML = emptyStateHtml({
@@ -77,10 +87,11 @@ export async function render() {
         ${list.map(d => `<div class="doc-card">
           <div class="doc-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M6 21v-2a6 6 0 0112 0v2"/></svg></div>
           <div style="flex:1;min-width:0">
-            <div class="doc-name">${esc(d.nombre)}</div>
+            <div class="doc-name">${esc(d.nombre)}${directoryTag(d, proposedMap)}</div>
             ${d.tarjetaProfesional ? `<div class="doc-tarjeta">T.P. ${esc(d.tarjetaProfesional)}</div>` : ''}
             <div class="doc-detail">${d.consultorio ? esc(d.consultorio) + ' · ' : ''}${d.centroId ? esc(centerMap[d.centroId] || '') : ''}</div>
           </div>
+          ${!d.publicSourceId && !proposedMap[d.id] ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${d.id}" title="Proponer al directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${d.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
           <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${d.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
         </div>`).join('')}
@@ -90,6 +101,62 @@ export async function render() {
 
   el.querySelectorAll('[data-edit-id]').forEach(b => b.addEventListener('click', () => openDoctorModal(b.dataset.editId)));
   el.querySelectorAll('[data-delete-id]').forEach(b => b.addEventListener('click', () => deleteDoctorConfirm(b.dataset.deleteId)));
+  el.querySelectorAll('[data-propose-id]').forEach(b => b.addEventListener('click', () =>
+    proposeDoctorConfirm(docs.find(d => d.id === b.dataset.proposeId), centerMap)));
+}
+
+/** Etiqueta junto al nombre según la relación con el directorio público. */
+function directoryTag(d, proposedMap) {
+  if (d.publicSourceId) return ' <span class="dir-mini-tag" title="Copiado desde el directorio público">Del directorio</span>';
+  if (proposedMap[d.id] === 'pendiente') return ' <span class="dir-mini-tag" title="Propuesto al directorio público, en revisión">Propuesto</span>';
+  if (proposedMap[d.id] === 'publicado') return ' <span class="dir-mini-tag" title="Publicado en el directorio público">En el directorio</span>';
+  return '';
+}
+
+/** Proponer un médico privado al directorio público (pieza A): se envía una
+ * copia de sus datos (el centro vinculado viaja como texto) y la
+ * administradora la aprueba, corrige o rechaza antes de publicarla. */
+function proposeDoctorConfirm(d, centerMap) {
+  if (!d) return;
+  const centroTexto = d.centroId ? (centerMap[d.centroId] || '') : '';
+  const filas = [
+    ['Nombre', d.nombre],
+    ['Especialidad', d.especialidad],
+    ['Tarjeta profesional', d.tarjetaProfesional],
+    ['Centro médico', centroTexto],
+    ['Consultorio', d.consultorio],
+    ['Teléfono', d.tel],
+    ['Notas', d.notas],
+  ].filter(([, v]) => v);
+  showModal(
+    'Proponer al directorio público',
+    `<div class="form-body">
+      <p style="font-size:12.5px;color:var(--ts);margin:0 0 12px">Se enviará esta información a la administradora, que la revisará antes de publicarla para todas las familias. Tu registro privado no se modifica.</p>
+      ${filas.map(([k, v]) => `<div class="dir-row"><strong style="min-width:130px;color:var(--tp)">${k}</strong><span>${esc(v)}</span></div>`).join('')}
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Proponer', cls: 'btn btn-primary', action: async () => {
+        try {
+          await api.proposePublicDoctor({
+            nombre: d.nombre,
+            especialidad: d.especialidad || '',
+            tarjetaProfesional: d.tarjetaProfesional || '',
+            centro: centroTexto,
+            consultorio: d.consultorio || '',
+            tel: d.tel || '',
+            notas: d.notas || '',
+            origenPrivadoId: d.id,
+          }, state.user.id);
+          closeModal();
+          showToast('Propuesta enviada a la administradora');
+          render();
+        } catch (err) {
+          showToast(err.message || 'No se pudo enviar la propuesta', 'err');
+        }
+      } },
+    ]
+  );
 }
 
 async function openDoctorModal(id) {

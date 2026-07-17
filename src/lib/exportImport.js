@@ -197,14 +197,21 @@ export async function importPayload(payload, householdId, onProgress = () => {})
 
   onProgress('Importando centros médicos…');
   for (const c of payload.centers || []) {
-    const saved = await api.saveCenter({ ...c, id: undefined }, householdId);
+    // publicSourceId (procedencia del directorio público, pieza A) no viaja
+    // entre familias: en el archivo puede venir un id que ya no exista en el
+    // directorio (la FK rechazaría el insert) y es metadato local, no dato
+    // clínico. Se quita la CLAVE (no basta ponerla en undefined: la capa de
+    // api solo escribe la columna si la clave está presente).
+    const { publicSourceId: _omitC, ...cRest } = c;
+    const saved = await api.saveCenter({ ...cRest, id: undefined }, householdId);
     centerMap.set(c.id, saved.id);
   }
 
   onProgress('Importando médicos…');
   for (const d of payload.doctors || []) {
+    const { publicSourceId: _omitD, ...dRest } = d;
     const saved = await api.saveDoctor({
-      ...d, id: undefined,
+      ...dRest, id: undefined,
       centroId: d.centroId ? centerMap.get(d.centroId) || null : null,
     }, householdId);
     doctorMap.set(d.id, saved.id);
