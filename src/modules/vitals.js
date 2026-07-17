@@ -15,6 +15,7 @@ const VITAL_FIELDS = [
   { key: 'frecRespiratoria', label: 'Frec. respiratoria', unit: 'rpm', color: '#06b6d4', low: 12, high: 20 },
   { key: 'perCintura', label: 'P. cintura', unit: 'cm', color: '#8b5cf6', low: null, high: null },
   { key: 'perCadera', label: 'P. cadera', unit: 'cm', color: '#22c55e', low: null, high: null },
+  { key: 'perCefalico', label: 'P. cefálico', unit: 'cm', color: '#84cc16', low: null, high: null },
 ];
 
 // Calcula la edad (en años cumplidos) entre la fecha de nacimiento y la fecha del registro.
@@ -284,6 +285,7 @@ function renderVitalsTable(records) {
         if (r.longitudTibial != null && r.longitudTibial !== '') return r.longitudTibial + ' (tibial)';
         return r.altura != null && r.altura !== '' ? r.altura : '—';
       } },
+    { key: 'perCefalico', label: 'P. cefálico (cm)', fmt: v => v || '—' },
     { key: 'presion', label: 'Presión (mmHg)', fmt: (v, r) => r.presionSis && r.presionDia ? r.presionSis + '/' + r.presionDia : '—' },
     { key: 'glucosa', label: 'Glucosa (mg/dL)', fmt: v => v || '—' },
     { key: 'saturacion', label: 'SpO₂ (%)', fmt: v => v || '—' },
@@ -321,6 +323,9 @@ async function openVitalModal(id) {
   const fechaInicial = r?.fecha || today();
   const edadInicial = calcEdad(fechaNac, fechaInicial);
   const gramosInicial = usaGramos(fechaNac, fechaInicial);
+  // Perímetro cefálico: rutinario en menores de 2 años. Se muestra en ese
+  // rango de edad, o si el registro que se edita ya tiene el dato cargado.
+  const mostrarCefalico = gramosInicial || (r?.perCefalico != null && r?.perCefalico !== '');
   // Modo de medición de estatura: 'altura' o 'tibial'. Si el registro ya trae
   // longitud tibial cargada, arranca en ese modo.
   const modoEstatura = r?.longitudTibial != null && r?.longitudTibial !== '' ? 'tibial' : 'altura';
@@ -364,6 +369,7 @@ async function openVitalModal(id) {
           <div class="form-field"><label class="fl">Perímetro cintura (cm)</label><input class="fi" id="vf-cintura" type="number" step="0.1" placeholder="cm" value="${r?.perCintura || ''}"/></div>
           <div class="form-field"><label class="fl">Perímetro cadera (cm)</label><input class="fi" id="vf-cadera" type="number" step="0.1" placeholder="cm" value="${r?.perCadera || ''}"/></div>
           <div class="form-field"><label class="fl">Perímetro brazo (cm)</label><input class="fi" id="vf-brazo" type="number" step="0.1" placeholder="cm" value="${r?.perBrazo || ''}"/></div>
+          <div class="form-field ${mostrarCefalico ? '' : 'hidden'}" id="vf-cefalico-field"><label class="fl">Perímetro cefálico (cm)</label><input class="fi" id="vf-cefalico" type="number" step="0.1" min="1" placeholder="cm" value="${r?.perCefalico || ''}"/><div class="fl" style="margin-top:4px;font-size:11px;color:var(--ts)">Rutinario en menores de 2 años.</div></div>
         </div>
       </div>
       <div class="vital-form-section">
@@ -396,6 +402,8 @@ async function openVitalModal(id) {
   const pesoUnitEl = document.getElementById('vf-peso-unit');
   const pesoInputEl = document.getElementById('vf-peso');
   const pesoHintEl = document.getElementById('vf-peso-hint');
+  const cefalicoField = document.getElementById('vf-cefalico-field');
+  const cefalicoInput = document.getElementById('vf-cefalico');
   fechaEl.addEventListener('change', () => {
     const nuevaEdad = calcEdad(fechaNac, fechaEl.value);
     edadEl.value = nuevaEdad != null ? nuevaEdad + ' años' : '—';
@@ -404,6 +412,9 @@ async function openVitalModal(id) {
     pesoInputEl.step = g ? '1' : '0.1';
     pesoInputEl.placeholder = g ? 'Ej: 3450' : 'Ej: 68.5';
     pesoHintEl.textContent = g ? 'Menor de 2 años: ingresa el peso en gramos.' : '';
+    // Mostrar el perímetro cefálico para menores de 2 años; no ocultarlo si
+    // ya se escribió un valor (para no perderlo al ajustar la fecha).
+    cefalicoField.classList.toggle('hidden', !(g || cefalicoInput.value));
   });
 
   // Alternar etiqueta del campo de estatura según el modo elegido.
@@ -445,6 +456,7 @@ async function saveVitalForm(editId) {
     perCintura: document.getElementById('vf-cintura').value || null,
     perCadera: document.getElementById('vf-cadera').value || null,
     perBrazo: document.getElementById('vf-brazo').value || null,
+    perCefalico: document.getElementById('vf-cefalico').value || null,
     presionSis: document.getElementById('vf-sis').value || null,
     presionDia: document.getElementById('vf-dia').value || null,
     temperatura: document.getElementById('vf-temp').value || null,

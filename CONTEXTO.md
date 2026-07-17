@@ -83,7 +83,8 @@ saludfamilia/
 │       ├── 0015_autorizaciones_medicamentos.sql ← MI AUDITORIA Órdenes #4
 │       ├── 0016_patient_diagnoses_update_rls.sql ← 2ª auditoría (editar diagnósticos)
 │       ├── 0017_medicamentos_indicacion_controlado_usos.sql ← auditoría Medicamentos
-│       └── 0018_vital_signs_auditoria.sql       ← auditoría Signos Vitales
+│       ├── 0018_vital_signs_auditoria.sql       ← auditoría Signos Vitales
+│       └── 0019_vital_signs_perimetro_cefalico.sql ← perímetro cefálico (lactantes)
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
@@ -123,14 +124,16 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, **18 migraciones** aplicadas (`0012`–`0015` del backlog
+  `ACTIVE_HEALTHY`, **19 migraciones** aplicadas (`0012`–`0015` del backlog
   MI AUDITORIA: avatar de paciente, aseguradora de pólizas, diagnósticos
   crónicos CIE10, y autorizaciones mes a mes de Órdenes; `0016` de la
   segunda auditoría: política RLS de UPDATE en `patient_diagnoses`; `0017`
   de la auditoría de Medicamentos: columnas `indicacion`/`controlado` en
   `medications` y tabla nueva `med_usage_events` con RLS; `0018` de la
   auditoría de Signos Vitales: columnas `hora`/`frecuencia_respiratoria`/
-  `longitud_tibial` en `vital_signs` y `peso` ampliado a `numeric(6,3)`).
+  `longitud_tibial` en `vital_signs` y `peso` ampliado a `numeric(6,3)`;
+  `0019`: columna `per_cefalico` en `vital_signs` — perímetro cefálico de
+  lactantes).
   **Ojo con la 0018**: en la tabla de migraciones de Supabase quedó
   registrada con el nombre `0005_vital_signs_auditoria` (se aplicó desde
   otra conversación que trabajaba sobre una copia local desactualizada). El
@@ -745,6 +748,12 @@ el estado actual del repo y se integró. Commit `a9753ff` + migración
   casos donde no se puede medir de pie). El historial aclara "(tibial)".
 - **Frecuencia respiratoria**: campo nuevo junto a la frecuencia cardíaca,
   visible también en el historial ("F.R.").
+- **Perímetro cefálico** (migración `0019`, agregado el 2026-07-17 a
+  pedido de la usuaria): medida de crecimiento rutinaria en lactantes. El
+  campo aparece en Antropometría cuando el paciente es menor de 2 años a la
+  fecha del registro (o si el registro ya tiene el dato), se muestra en el
+  historial y también es graficable (KPI + evolución), como el resto de
+  perímetros.
 
 **Revisión y mejora en esta sesión**: se confirmó por `diff` que la otra
 conversación no tocó nada más de `api.js` (los cambios de las auditorías
