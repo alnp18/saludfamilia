@@ -431,6 +431,47 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 .viewer-stage.zoomed .viewer-content iframe { pointer-events: none; }
 .viewer-loading, .viewer-error { color: var(--ts); font-size: 14px; }
 
+/* ══ RECORTADOR DE IMAGEN ══ (src/lib/imageCropper.js — avatar y carnets de
+   pólizas, auditoría 2026-07-17). Mismo lenguaje visual que el visor de
+   adjuntos de arriba (barra fija + botones de zoom), z-index 960: por
+   encima del visor (950) por si alguna vez coinciden, por debajo del
+   toast (999). */
+.cropper-overlay {
+  position: fixed; inset: 0; z-index: 960;
+  background: rgba(0,0,0,.86);
+  display: flex; flex-direction: column;
+}
+.cropper-bar {
+  flex-shrink: 0; height: 52px; position: sticky; top: 0; z-index: 2;
+  display: flex; align-items: center; gap: 14px; padding: 0 14px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.cropper-title {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 13px; font-weight: 600; color: var(--tp);
+}
+.cropper-zoom { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.cropper-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.cropper-stage {
+  flex: 1; overflow: hidden; position: relative;
+  display: flex; align-items: center; justify-content: center;
+  touch-action: none; cursor: grab;
+}
+.cropper-stage.dragging { cursor: grabbing; }
+.cropper-img {
+  position: absolute; left: 50%; top: 50%; max-width: none; max-height: none;
+  user-select: none; -webkit-user-drag: none; will-change: transform;
+}
+/* El "agujero" claro sobre fondo oscurecido se logra con un box-shadow
+   enorme en vez de superponer un canvas — más simple y sin capas extra. */
+.cropper-frame {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%);
+  border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0,0,0,.6);
+  pointer-events: none;
+}
+.cropper-frame.is-circle { border-radius: 50%; }
+.cropper-loading { color: var(--ts); font-size: 14px; }
+
 /* ══ EMPTY STATE ══ */
 .empty-state {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -440,6 +481,12 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 .empty-state .es-ic svg { width: 52px; height: 52px; stroke-width: 1.1; }
 .empty-state h3 { font-size: 16px; font-weight: 700; color: var(--tp); }
 .empty-state p  { font-size: 13px; max-width: 300px; line-height: 1.65; }
+
+/* Variante de error (P2 #11 — src/lib/emptyState.js): mismo layout que el
+   empty-state normal, con acento rojo para distinguir "todavía no hay
+   nada" de "algo falló al cargar". */
+.empty-state.is-error .es-ic { color: var(--red-lt); }
+.empty-state.is-error h3 { color: var(--red-lt); }
 
 /* ══ TOAST ══ */
 #toast {

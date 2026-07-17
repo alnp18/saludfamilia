@@ -25,6 +25,23 @@ const VIEW_RENDERERS = {
   family: Family.render,
 };
 
+// P2 #11 — red de seguridad: cada módulo ya debería manejar sus propios
+// errores de carga (try/catch + estado de error propio), pero render() es
+// siempre async y hasta ahora se invocaba sin await ni .catch() en los dos
+// puntos de entrada de abajo. Si algo se escapaba (un bug, un caso no
+// cubierto), quedaba como una promesa rechazada sin manejar: totalmente
+// silenciosa para el usuario — la vista cambiaba de "activa" pero el
+// contenido se quedaba en blanco o con lo que hubiera antes, sin ningún
+// aviso. Este wrapper es el último respaldo, no el manejo principal.
+function safeRenderView(v) {
+  const fn = VIEW_RENDERERS[v];
+  if (!fn) return;
+  Promise.resolve(fn()).catch(err => {
+    console.error(`Error al renderizar la vista "${v}":`, err);
+    showToast('No se pudo cargar esta sección. Intenta de nuevo.', 'err');
+  });
+}
+
 function goView(v, options) {
   if (v === 'orders' && options) Orders.setPendingOptions(options);
   if (v === 'meds' && options) Meds.setPendingOptions(options);
@@ -37,7 +54,7 @@ function goView(v, options) {
   state.currentView = v;
   closePatientDrop();
   closeMobileNav();
-  VIEW_RENDERERS[v]?.();
+  safeRenderView(v);
 }
 
 async function setActivePatient(patient) {
@@ -46,7 +63,7 @@ async function setActivePatient(patient) {
   updatePatientHeader();
   updateNoPatientBanner();
   applyPatientTheme(patient);
-  VIEW_RENDERERS[state.currentView]?.();
+  safeRenderView(state.currentView);
   closePatientDrop();
 }
 
@@ -78,7 +95,16 @@ async function bootstrapApp() {
     return;
   }
 
-  const patients = await api.listPatients(state.household.id);
+  let patients = [];
+  try {
+    patients = await api.listPatients(state.household.id);
+  } catch (err) {
+    // No cortar el arranque por esto: sin la lista de pacientes no se puede
+    // restaurar el paciente activo ni el badge del sidebar, pero el resto
+    // de la app (navegación, vistas) debe seguir siendo usable — cada
+    // módulo reintentará su propia carga al visitarlo.
+    showToast(err.message || 'No se pudo cargar la lista de pacientes', 'err');
+  }
   document.getElementById('sb-badge-patients').textContent = patients.length;
 
   const savedId = restoreActivePatientId();

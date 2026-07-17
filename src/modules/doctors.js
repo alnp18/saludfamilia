@@ -4,6 +4,7 @@ import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc } from '../lib/utils.js';
 import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 
 const SP_COLORS_MAP = {
   'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
@@ -32,15 +33,28 @@ export async function render() {
   `;
   document.getElementById('btn-new-doctor').addEventListener('click', () => openDoctorModal());
 
-  const docs = await api.listDoctors(state.household.id);
-  const centers = await api.listCenters(state.household.id);
-  const centerMap = Object.fromEntries(centers.map(c => [c.id, c.nombre]));
   const el = document.getElementById('doctors-content');
+  let docs, centers;
+  try {
+    [docs, centers] = await Promise.all([
+      api.listDoctors(state.household.id),
+      api.listCenters(state.household.id),
+    ]);
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar los médicos', 'err');
+    el.innerHTML = errorStateHtml({ retryId: 'btn-retry-doctors' });
+    document.getElementById('btn-retry-doctors').addEventListener('click', () => render());
+    return;
+  }
+  const centerMap = Object.fromEntries(centers.map(c => [c.id, c.nombre]));
 
   if (!docs.length) {
-    el.innerHTML = `<div class="empty-state"><svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
-      <h3>Sin médicos registrados</h3><p>Registra los especialistas que atienden a tus pacientes.</p>
-      <button class="btn btn-primary" id="btn-new-doctor-empty" style="margin-top:8px">Agregar primer médico</button></div>`;
+    el.innerHTML = emptyStateHtml({
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>',
+      title: 'Sin médicos registrados',
+      message: 'Registra los especialistas que atienden a tus pacientes.',
+      action: { id: 'btn-new-doctor-empty', label: 'Agregar primer médico' },
+    });
     document.getElementById('btn-new-doctor-empty').addEventListener('click', () => openDoctorModal());
     return;
   }
@@ -79,11 +93,17 @@ export async function render() {
 }
 
 async function openDoctorModal(id) {
-  const [centers, customEsp, d] = await Promise.all([
-    api.listCenters(state.household.id),
-    api.listCatalogOptions(state.household.id, CATEGORIA_ESPECIALIDAD),
-    id ? api.getDoctor(id) : Promise.resolve(null),
-  ]);
+  let centers, customEsp, d;
+  try {
+    [centers, customEsp, d] = await Promise.all([
+      api.listCenters(state.household.id),
+      api.listCatalogOptions(state.household.id, CATEGORIA_ESPECIALIDAD),
+      id ? api.getDoctor(id) : Promise.resolve(null),
+    ]);
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir el formulario del médico', 'err');
+    return;
+  }
   const knownEsp = [...SPECIALTIES, ...customEsp];
   // Compatibilidad: especialidad guardada que no está ni en las fijas ni
   // en el catálogo (dato viejo o importado) → se preselecciona "Otra…"
@@ -163,7 +183,11 @@ async function saveDoctorForm(editId) {
 
 async function deleteDoctorConfirm(id) {
   if (!confirm('¿Eliminar este médico del directorio?')) return;
-  await api.deleteDoctor(id);
-  showToast('Médico eliminado', 'warn');
-  render();
+  try {
+    await api.deleteDoctor(id);
+    showToast('Médico eliminado', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el médico', 'err');
+  }
 }

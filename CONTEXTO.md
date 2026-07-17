@@ -1,7 +1,9 @@
 # SaludFamilia — Contexto del proyecto
 
-_Última actualización: 2026-07-16 (P1.5 — Órdenes médicas, Medicamentos,
-Médicos e imágenes/documentos transversal)_
+_Última actualización: 2026-07-17 (P1.5 completa + P2 100% completa +
+backlog "MI AUDITORIA" de Ficha de paciente y Órdenes médicas + segunda
+auditoría rápida del usuario sobre la Ficha de paciente: recorte de
+imagen, editar pólizas/diagnósticos, fix del selector de tipo de póliza)_
 
 ## Qué es
 
@@ -12,9 +14,10 @@ Frontend estático (Vite, sin framework) desplegado en Vercel.
 ## Objetivo actual
 
 El MVP público (70% de funcionalidades CORE) está **desbloqueado, accesible
-y verificado E2E en producción** (ver sección de datos y de historial). El
-trabajo que sigue tiene tres frentes, documentados con prioridad y agente
-recomendado en `docs/Plan_de_Avance_MVP.docx`:
+y verificado E2E en producción** (ver sección de datos y de historial).
+Casi todo el trabajo relevado hasta ahora está completado; el detalle por
+frente, con prioridad y agente recomendado, está en
+`docs/Plan_de_Avance_MVP.docx`:
 
 1. ✅ Verificación E2E formal contra producción — **COMPLETADA** el
    2026-07-15 (signup → paciente → orden → medicamentos → vitales, con
@@ -36,15 +39,24 @@ recomendado en `docs/Plan_de_Avance_MVP.docx`:
    hubo datos que mover). Pendiente su E2E por UI en producción.
 6. ✅ Auditoría de seguridad RLS pre-lanzamiento (P1 #8) — **COMPLETADA**
    el 2026-07-16 (migraciones 0007 y 0008). Detalle abajo.
-7. Ajustes de interfaz (P1.5, Sonnet) — **la mayoría COMPLETADA** el
+7. ✅ Ajustes de interfaz (P1.5, Sonnet) — **COMPLETADA al 100%** el
    2026-07-16: tema visual, Ficha de paciente, Órdenes médicas,
-   Medicamentos, Médicos, y el cambio transversal de imágenes/documentos
-   (foto→PDF + captura por cámara). Detalle en la sección dedicada abajo.
-   Quedan pendientes de esa tanda: el componente de ampliar/descargar
-   imágenes (lightbox), P2, y migrar Pólizas (Pacientes) al helper
-   compartido de catálogo extensible.
-8. Pieza A de arquitectura (directorio público auditado de médicos y
-   centros), diseñada a alto nivel pero sin implementar (Fable).
+   Medicamentos, Médicos, cambio transversal de imágenes/documentos
+   (foto→PDF + captura por cámara + visor con lightbox y descarga), y la
+   migración de Pólizas al helper compartido de catálogo extensible. No
+   queda ningún ítem pendiente de esta tanda. Detalle en la sección
+   dedicada abajo.
+8. ✅ Prioridad P2 (Sonnet) — **4 de 4 tareas COMPLETADAS** el 2026-07-16:
+   responsive móvil, eliminar `SaludFamilia.html` legacy, aviso médico y
+   de privacidad, y estados vacíos/manejo de errores consistente (P2 #11,
+   último ítem, cerrado el mismo día). No queda ningún ítem pendiente de
+   esta tanda.
+9. ✅ Backlog adicional relevado por la usuaria, "**MI AUDITORIA**" —
+   **COMPLETADO** el 2026-07-16: 5 ajustes en Ficha de paciente y una
+   restructuración de 5 partes en Órdenes médicas. No estaba en el plan
+   original — ver sección dedicada abajo.
+10. Pieza A de arquitectura (directorio público auditado de médicos y
+    centros), diseñada a alto nivel pero sin implementar (Fable).
 
 ## Arquitectura
 
@@ -63,23 +75,42 @@ saludfamilia/
 │       ├── 0009_ficha_paciente_edicion.sql   ← nombre en 4 campos, dirección,
 │       │                                       contacto emergencia, pólizas
 │       ├── 0010_medicamentos_horarios_frecuencia.sql ← horarios jsonb {hora,dosis}
-│       └── 0011_medicos_tarjeta_profesional.sql
+│       ├── 0011_medicos_tarjeta_profesional.sql
+│       ├── 0012_avatar_paciente.sql          ← MI AUDITORIA Pacientes #1
+│       ├── 0013_poliza_aseguradora.sql       ← MI AUDITORIA Pacientes #3
+│       ├── 0014_diagnosticos_cronicos.sql    ← MI AUDITORIA Pacientes #5
+│       └── 0015_autorizaciones_medicamentos.sql ← MI AUDITORIA Órdenes #4
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
 │   │   ├── auth.js            ← signUp/signIn/signOut + ensureHousehold()
 │   │   │                        + requestPasswordReset/updatePassword
-│   │   ├── api.js              ← + sección FAMILIA (miembros/invitaciones)
+│   │   ├── api.js              ← + FAMILIA (miembros/invitaciones) +
+│   │   │                          order_authorizations (MI AUDITORIA Órdenes #4)
 │   │   ├── files.js            ← adjuntos en Storage (subir/firmar/borrar) +
 │   │   │                          processUploadFile() (validación + foto→PDF)
+│   │   ├── avatar.js           ← foto de perfil del paciente (redimensiona
+│   │   │                          en el cliente, no se convierte a PDF)
+│   │   ├── viewModeOverlay.js  ← ventana sobrepuesta de solo lectura
+│   │   │                          (Pacientes y Órdenes, barra fija + Editar)
+│   │   ├── viewer.js           ← visor de adjuntos: ampliar/descargar,
+│   │   │                          zoom 100–300%, arrastre
+│   │   ├── inlineDirectory.js  ← alta rápida de médico/centro sin salir del flujo
+│   │   ├── legal.js            ← aviso médico y de privacidad (P2 #12)
+│   │   ├── emptyState.js       ← empty state / error state compartidos
+│   │   │                          (P2 #11)
+│   │   ├── imageCropper.js     ← recorte/encuadre de imagen (arrastre + zoom)
+│   │   │                          para avatar y carnet de póliza (auditoría 2026-07-17)
 │   │   ├── exportImport.js     ← exportar/importar cifrado (.sfam)
-│   │   ├── extensibleCatalog.js ← patrón "Otra…" compartido (Medicamentos,
-│   │   │                           Médicos; Pólizas aún con su propia copia)
+│   │   ├── extensibleCatalog.js ← patrón "Otra…" compartido (Pólizas,
+│   │   │                           Medicamentos, Médicos — los tres módulos)
 │   │   ├── theme.js            ← ThemeEngine: paleta determinista por paciente
 │   │   ├── icons.js
 │   │   ├── modal.js
 │   │   └── utils.js
-│   ├── modules/                ← incluye header.js y family.js
+│   ├── modules/                ← incluye header.js y family.js; orders.js
+│   │                             agrupa además la pestaña Flujo (línea de
+│   │                             tiempo, MI AUDITORIA Órdenes #5)
 │   ├── state.js
 │   └── main.js                 ← auth screen + bootstrap + router
 ├── index.html / vite.config.js / vercel.json / package.json
@@ -88,13 +119,17 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, 11 migraciones aplicadas (las últimas, `0009`–`0011`,
-  del trabajo P1.5 de esta sesión). Plan gratuito — "Leaked password
-  protection" NO se puede activar (requiere Pro); el mínimo de contraseña
-  se subió a 8 caracteres en Auth (2026-07-16). PostgreSQL 17. Bucket
-  privado de Storage `adjuntos` (10MB máx., imágenes y PDF). Tabla de
-  catálogo compartida `custom_catalog_options` (household_id, categoria,
-  valor) para el patrón "Otra… extensible".
+  `ACTIVE_HEALTHY`, **16 migraciones** aplicadas (`0012`–`0015` del backlog
+  MI AUDITORIA: avatar de paciente, aseguradora de pólizas, diagnósticos
+  crónicos CIE10, y autorizaciones mes a mes de Órdenes; `0016` de la
+  segunda auditoría: política RLS de UPDATE en `patient_diagnoses`).
+  Plan gratuito — "Leaked password protection" NO se puede activar
+  (requiere Pro); el mínimo de contraseña se subió a 8 caracteres en Auth
+  (2026-07-16). PostgreSQL 17. Bucket privado de Storage `adjuntos` (10MB
+  máx., imágenes y PDF). Tabla de catálogo compartida
+  `custom_catalog_options` (household_id, categoria, valor) para el
+  patrón "Otra… extensible", usada ahora por los tres módulos (Pólizas,
+  Vía de administración, Especialidad).
 - **Vercel**: proyecto `saludfamilia` (team `alnp`, id
   `team_upa18NsIqLYAoLBKzY61ioPk`). URL de producción:
   **https://saludfamilia.vercel.app** (alias también
@@ -103,12 +138,17 @@ saludfamilia/
   `VITE_SUPABASE_ANON_KEY` en el environment **Production**. Cada push a
   `main` dispara deploy automático.
 - **GitHub**: [alnp18/saludfamilia](https://github.com/alnp18/saludfamilia),
-  rama `main`. **Sin conector MCP para Claude ni `gh` autenticado** en el
-  sandbox de las sesiones — confirmado de nuevo el 2026-07-15. El repo es
-  público, así que sí se puede clonar en modo lectura sin credenciales;
-  para hacer push hace falta un token o que el usuario lo haga desde su
-  PowerShell local (`git add` / `commit` / `push`). Verificar deploys con
-  `Vercel:list_deployments`.
+  rama `main`. **Sin conector MCP para Claude ni credenciales de `git push`**
+  en el sandbox de las sesiones — reconfirmado el 2026-07-16 (`git push`
+  falla con `could not read Username for 'https://github.com': terminal
+  prompts disabled`). El repo es público, así que sí se puede clonar en
+  modo lectura sin credenciales; el patrón que funciona es generar un
+  `git bundle` (`git bundle create archivo.bundle origin/main..main`),
+  entregarlo con `SendUserFile` + `device_commit_files` a `~/Downloads/`
+  del usuario, y que el usuario lo fusione y empuje desde su PowerShell
+  local (`git fetch archivo.bundle main:bundle-N` → `git merge bundle-N`
+  → `git push origin main`). Usado con éxito repetidas veces durante la
+  sesión de MI AUDITORIA. Verificar deploys con `Vercel:list_deployments`.
 - **Navegador (Claude in Chrome)**: la extensión NO viene conectada por
   defecto. Para un E2E real por UI hay que pedirle al usuario que active la
   extensión y dé permiso al dominio `saludfamilia.vercel.app`. Con la
@@ -119,42 +159,29 @@ saludfamilia/
 
 ## Estado de los datos (importante para el próximo agente)
 
-**La base de datos YA NO está vacía.** Se conservaron deliberadamente los
-datos de prueba generados en los E2E, tanto los de P1 (2026-07-15) como
-los de la verificación de P1.5 hecha en producción esta sesión
-(Órdenes/Medicamentos/Médicos e imágenes→PDF). Conteo real verificado por
-SQL el 2026-07-16:
+**La base de datos de producción está vacía de datos clínicos de nuevo.**
+Conteo real verificado por SQL el 2026-07-16 (después del backlog MI
+AUDITORIA, sin que esta sesión escribiera datos de prueba — todas las
+verificaciones de MI AUDITORIA se hicieron con Playwright reconstruyendo
+HTML en local, no contra Supabase):
 
-- `auth.users`: **2**
-  - `alnp.alnp@gmail.com` (id `c310a4a2-887d-47fe-840b-221c9deb746c`) —
-    household "Mi familia" (`f1196d77-f03f-40a7-b84c-36fc338cac36`), rol
-    owner. Concentra **todo** el set de datos de prueba (ver abajo),
-    incluidos los generados durante el E2E de P1.5.
-  - `dacn.2026@gmail.com` (id `09c80114-1114-4932-966d-ddd6f3d66c60`) —
-    su household (`2d3348a6-fe8c-4822-a87f-6024039da6bd`) sigue **vacío**
-    (0 pacientes/órdenes/medicamentos/médicos/centros).
-- `households`: 2 · `household_members`: 2
-- Datos de `alnp.alnp` (todos "prueba E2E", crecieron durante la
-  verificación de P1.5 — ya no son solo 1 registro por tabla como en el
-  snapshot del 2026-07-15):
-  - `patients`: **1** — "Prueba E2E Paciente" (1990-05-15, Masculino, O+,
-    EPS Prueba, afiliado TEST-000123).
-  - `medical_orders`: **18** — generadas probando el nuevo flujo de
-    navegación por etapas con confirmación, el filtro por especialidad y
-    el alta rápida de médico/centro desde la orden.
-  - `medications`: **3** — probando el rediseño de Frecuencia/Horarios de
-    toma (dosis por horario, recálculo automático) y Vía de
-    administración extensible.
-  - `doctors`: **4** · `medical_centers`: **4** — creados vía alta rápida
-    desde Órdenes/Médicos durante el E2E (antes ambos directorios estaban
-    vacíos).
-  - `vital_signs`: **1** (sin cambios).
-  - `custom_catalog_options`: **2** — `especialidad = "Endocrinologia"` y
-    `via_administracion = "Grandes Pliegues"`, cargadas probando el
-    patrón "Otra… extensible" en Médicos y Medicamentos.
+- `auth.users`: **2** (`alnp.alnp@gmail.com` y `dacn.2026@gmail.com`).
+- `households`: 2 · `household_members`: 2.
+- `patients`, `medical_orders`, `medications`, `doctors`,
+  `medical_centers`, `vital_signs`, `patient_policies`,
+  `patient_diagnoses`, `order_authorizations`: **0 en todas** — el volumen
+  de datos de prueba que existía tras el E2E de P1.5 (18 órdenes, 3
+  medicamentos, 4 médicos, 4 centros, etc.) **ya no está**; alguien lo
+  limpió entre sesiones (no fue esta sesión).
+- `custom_catalog_options`: **2** (quedan `especialidad =
+  "Endocrinologia"` y `via_administracion = "Grandes Pliegues"`, restos
+  de pruebas del patrón "Otra… extensible" — limpieza opcional, no
+  bloqueante).
 
-**Consecuencia práctica**: si se necesita un E2E limpio de nuevo, o bien
-usar un tercer correo, o limpiar estos datos primero. El esquema, funciones,
+**Consecuencia práctica**: la base está en buen estado para un E2E limpio
+de MI AUDITORIA (Avatar, Pólizas, Crónicos, Autorizaciones, Flujo) contra
+producción si se quiere verificar por UI real — hoy solo se verificó con
+capturas de pantalla locales, no con datos reales. El esquema, funciones,
 triggers y políticas RLS están intactos.
 
 ## Resultado de la verificación E2E en producción (2026-07-15)
@@ -387,13 +414,12 @@ verificado E2E en producción salvo donde se indica lo contrario.
   nuevo campo "Número de tarjeta profesional" debajo del nombre.
   Migración `0011`.
 - **Patrón "Otra… extensible" — helper compartido** (`src/lib/
-  extensibleCatalog.js`, nuevo): un único módulo (`catalogOptionsHtml`,
+  extensibleCatalog.js`): un único módulo (`catalogOptionsHtml`,
   `resolveCatalogValue`, constante `OTRA_VALUE`) reutilizado por
-  Medicamentos (Vía de administración) y Médicos (Especialidad), en vez
-  de reimplementar el patrón en cada módulo. **Pendiente (opcional, no
-  bloqueante)**: Pólizas (Ficha de paciente) sigue con su propia
-  implementación inline, previa a este helper — migrarla es limpieza de
-  código, no un bug.
+  Medicamentos (Vía de administración), Médicos (Especialidad) y, desde
+  el **commit `6ef6bbc`** (2026-07-16), también por Pólizas (Ficha de
+  paciente) — los tres módulos ya comparten una sola implementación, sin
+  cambios de comportamiento para el usuario.
 - **Cambio transversal — imágenes y documentos** (commit `d420668`):
   - Opción de tomar la foto directamente desde el navegador (`<input
     capture="environment">`) junto a cada campo de subir archivo, en las
@@ -402,11 +428,13 @@ verificado E2E en producción salvo donde se indica lo contrario.
     automáticamente a PDF de una sola página antes de guardarse
     (`files.processUploadFile()`), para no acumular adjuntos pesados. Un
     PDF subido directamente pasa sin tocar.
-  - **Pendiente del ítem original del plan**: el lightbox/modal para
-    ampliar cualquier imagen o documento con un botón de descarga
-    (componente reutilizable único) **no se implementó** todavía — lo
-    que se hizo esta sesión fue la captura por cámara y la conversión a
-    PDF, que son un pedido distinto y posterior del usuario.
+  - **Ítem original del plan completado** con el **commit `db4fc95`**
+    (2026-07-16, sesión siguiente): visor de adjuntos en ventana
+    sobrepuesta (`src/lib/viewer.js`), reemplazando el viejo
+    `files.openAttachment()` (que abría una pestaña nueva). Barra
+    superior fija con descarga y cierre, zoom 100–300% sin salir de la
+    app, y arrastre para desplazar el documento ampliado. A 100% un PDF
+    conserva su scroll nativo.
 - **Bug de producción encontrado y corregido** (commit `fb4e042`,
   **relevante para cualquier trabajo futuro sobre adjuntos**): al guardar
   una orden con una foto recién convertida a PDF, Supabase Storage
@@ -430,6 +458,206 @@ verificado E2E en producción salvo donde se indica lo contrario.
   chunk que ya no existe tras el deploy nuevo, y el rewrite catch-all
   devuelve HTML en vez de 404. Resuelto por el usuario con un hard
   refresh; sin cambio de código.
+
+## Prioridad P2 — Calidad para el público (4/4 completadas, sesión 2026-07-16)
+
+Sesión posterior al cierre de P1.5. Las cuatro tareas numeradas del plan
+quedaron completadas:
+
+- **P2 #9 — Responsive móvil** (commit `c9c3477`): a ≤768px el sidebar
+  quedaba oculto por completo (`display:none`) **sin ningún reemplazo** —
+  no había forma de cambiar de sección desde el teléfono, en una app que
+  se usa sobre todo así. Se agregó un botón de menú en el header (solo en
+  móvil) que abre el sidebar como panel superpuesto (drawer) con backdrop;
+  se cierra al tocar el fondo o elegir una sección.
+- **P2 #10 — Eliminar `SaludFamilia.html` legacy** (commit `1292cfb`): HTML
+  monolítico de 207KB de una versión previa, no referenciado por nada
+  (ni `index.html`, ni `vercel.json`, ni `package.json`). Eliminado —
+  recuperable del historial de git si hiciera falta. README actualizado
+  con el árbol de arquitectura real y las 11 migraciones que existían en
+  ese momento (hoy son 15, ver más abajo).
+- **P2 #12 — Aviso médico y de privacidad** (commit `d14ecbf`, nuevo
+  `src/lib/legal.js`): texto simple acorde a lo que es el proyecto (uso
+  familiar, no producto comercial). Cubre: no reemplaza atención médica
+  profesional, dónde vive la información (Supabase, aislado por
+  household), y el control del usuario sobre sus datos. Accesible desde
+  un link en la pantalla de login (antes de autenticarse) y desde una
+  card en la app.
+- **P2 #11 — Estados vacíos y manejo de errores consistente** (commit
+  `a515d18`): antes de este cambio cada módulo armaba su propio "empty
+  state" a mano, con variantes inconsistentes (ícono envuelto o suelto,
+  con o sin `h3`/`p`/botón), y la mayoría de los `render()` no tenían
+  `try/catch` alrededor de sus llamadas a la API — un error de red dejaba
+  la vista en blanco o con datos viejos, sin ningún aviso. Se agregó
+  `src/lib/emptyState.js` (`emptyStateHtml()`/`errorStateHtml()`) como
+  helper compartido y se aplicó en los ocho módulos con datos propios
+  (Pacientes, Centros, Médicos, Medicamentos, Signos vitales, Órdenes,
+  Dashboard, Familia): cada `render()` ahora captura errores de carga y
+  muestra un estado de error con botón de reintento, y varios
+  manejadores de acción (eliminar, suspender, abrir modal) que no tenían
+  manejo de errores ahora sí lo tienen. También se blindó el enrutador
+  de `main.js` (`goView()`/`setActivePatient()` invocaban el `render()`
+  del módulo sin `await`/`.catch()`, así que una excepción no capturada
+  dentro de un módulo quedaba como promesa rechazada silenciosa) y la
+  carga inicial de pacientes en `bootstrapApp()`. Verificado con
+  `npm run build` y capturas de Playwright de ambos estados (vacío y
+  error) en modo claro y oscuro. Con esto se cierra P2 al 100%.
+
+## MI AUDITORIA — Ficha de paciente y Órdenes médicas (completado 2026-07-16)
+
+Backlog **independiente del plan original y de P1.5**, relevado
+directamente por la usuaria tras usar la app en producción (título literal
+del mensaje: "MI AUDITORIA"). Cubre 5 ajustes puntuales en Ficha de
+paciente y una restructuración de 5 partes en Órdenes médicas — 10 tareas
+en total, todas completadas y verificadas en esta sesión. Antes de
+implementar se confirmaron explícitamente con el usuario tres decisiones
+de diseño que no eran obvias a partir del pedido original (ver notas en
+cada ítem de Órdenes #4 y Pacientes #5).
+
+**Pacientes (5/5):**
+
+- **#1 — Avatar**: foto de perfil subida y redimensionada en el cliente
+  antes de guardar en Storage (bucket `adjuntos`); a diferencia de los
+  adjuntos de órdenes/pólizas, **no** se convierte a PDF — se sube y
+  muestra tal cual (`src/lib/avatar.js`). Migración `0012` (columna
+  `patients.foto`, jsonb). Commit `f31e0ac`.
+- **#2 — Parentesco**: se agregó la opción "Pareja/Cónyuge" al
+  desplegable de contacto de emergencia. Commit `3dd0368`.
+- **#3 — Pólizas**: nuevo campo de texto libre "Nombre de la
+  aseguradora" — deliberadamente **no** se modeló como catálogo
+  extensible "Otra…", porque es dato puntual de cada póliza, no una
+  clasificación reutilizable entre pólizas del household. Migración
+  `0013` (columna `patient_policies.aseguradora`). Commit `3dd0368`.
+- **#4 — Modo vista**: ventana sobrepuesta de solo lectura al abrir la
+  ficha del paciente (`src/lib/viewModeOverlay.js`), con barra superior
+  fija que no se mueve al hacer scroll y botón Editar junto a Cerrar —
+  mismo patrón que ya usaba Órdenes. Commit `2d95efa`.
+- **#5 — Condiciones crónicas**: checkbox que habilita un desplegable
+  "Añadir diagnóstico" en modo **manual** (código CIE10 ya conocido por
+  el usuario). **Decisión tomada con el usuario**: por ahora solo carga
+  manual — la búsqueda por código/nombre contra el catálogo CIE10 (PDF
+  de la OPS/PAHO en `ais.paho.org`) queda diferida a una fase futura, ya
+  que ese documento no es consultable en vivo por código y requiere
+  definir la fuente de datos. Migración `0014` (tabla nueva
+  `patient_diagnoses`, uno a muchos). Commit `fdbd65a`.
+
+**Órdenes médicas (5/5):**
+
+- **#1 — Bloqueo de eliminación**: una orden solo puede eliminarse
+  mientras sigue en la etapa A (recién creada, nada tramitado todavía);
+  a partir de ahí solo es editable, con aviso desde el momento de
+  creación. Se revalida contra el servidor al momento de eliminar, no
+  solo el botón visible en la tarjeta (cubre el caso de otra
+  pestaña/dispositivo que ya la haya hecho avanzar de etapa). Commit
+  `d385a2d`.
+- **#2 — Filtros expandidos**: etapa, especialidad, médico y tipo de
+  orden, todos "extensibles" a la etapa activa — cada selector solo
+  lista las opciones presentes entre las órdenes de la etapa
+  actualmente filtrada (no todo el histórico), más un filtro de rango
+  de fechas. Commit `30666f5`.
+- **#3 — Modo vista**: mismo patrón de ventana sobrepuesta de solo
+  lectura que Pacientes #4, con botón "Actualizar" que abre el
+  asistente directo en la etapa pendiente en vez de en la etapa A.
+  Commit `0114249`.
+- **#4 — Restructuración de tipo de orden**: se elimina "Insumos
+  Médicos" y "Medicamentos" pasa a llamarse
+  "Medicamentos/Insumos/Terapias" (las órdenes existentes de ambos
+  tipos se migraron automáticamente — se verificó contra producción
+  antes de aplicar que ninguna de las 3 órdenes afectadas tenía cita ni
+  autorización ya cargada, así que la fusión no perdió datos). Este
+  tipo reemplaza la etapa "Autorización" (un registro) por
+  "Autorizaciones": se declara un número de meses y se genera **una
+  fila por mes** (número de autorización, fecha de inicio, fecha de
+  vencimiento, cantidad, entregado) en la nueva tabla
+  `order_authorizations`. Nunca pasa por la etapa Cita — queda
+  bloqueada en la UI — y se finaliza con un botón manual "Marcar como
+  finalizado" (reutiliza `estado_cita`, el mismo campo que ya
+  significaba "proceso finalizado manualmente"). "Centro Médico" se
+  renombra a "Proveedor" en este flujo (mismo directorio). **Dos
+  decisiones tomadas con el usuario**: una fila por mes en vez de un
+  dato meramente informativo, y botón manual de finalizado en vez de
+  automático (ya que este tipo no pasa por Cita, que es lo que
+  normalmente dispara Finalizado). Migración `0015` (columna
+  `medical_orders.auth_meses`, tabla `order_authorizations`, ajuste de
+  la función `order_stage()` con reglas propias para este tipo antes de
+  las generales). Commit `67e7672`.
+- **#5 — Pestaña Flujo**: nueva vista de línea de tiempo junto a
+  "Lista" en Órdenes, que agrupa en un solo bloque las órdenes
+  generadas el mismo día para el mismo médico tratante (mismo médico
+  implica misma especialidad). En colapsado cada grupo muestra solo
+  especialidad + fecha (línea de tiempo minimalista); al hacer click se
+  expande y muestra el médico y el detalle de todo lo ordenado ese día,
+  con acceso directo a cada orden. Commit `927cbd9`.
+
+**Verificación**: cada ítem se probó con Playwright reconstruyendo el HTML
+real de los componentes afectados (varios no están exportados y requieren
+una sesión autenticada de Supabase para ejercitarse de punta a punta) y
+tomando capturas de pantalla, **sin escribir datos de prueba en el
+proyecto de Supabase de producción**. La migración `0015` se verificó
+además contra los datos reales antes de aplicarse por SQL. Los 10 commits
+se entregaron por bundles de git (ver nota en Infraestructura → GitHub) y
+ya están fusionados en `origin/main` — confirmado por el usuario.
+
+## Segunda auditoría rápida — Ficha de paciente (completada 2026-07-17)
+
+Cuatro hallazgos que el usuario reportó tras una revisión rápida de la app
+en producción (independiente del plan original, de P1.5 y de la primera
+MI AUDITORIA). Los cuatro se resolvieron en la misma sesión, commit
+`0215e0b`:
+
+- **Recorte de imagen al subir**: la foto de perfil del paciente y el
+  carnet de una póliza ahora pueden recortarse/encuadrarse antes de
+  guardarse (antes se subían tal cual). Nuevo helper compartido
+  `src/lib/imageCropper.js` — ventana sobrepuesta propia (mismo criterio
+  que `viewer.js`: puede abrirse encima del modal de ficha de paciente,
+  que sigue abierto detrás) con arrastre para encuadrar + botones de zoom
+  (100%–300%, mismo lenguaje visual que el visor de adjuntos). El marco
+  guía es circular para el avatar (salida cuadrada 480×480 — el círculo
+  visual lo sigue aplicando el CSS al mostrarlo, como ya se hacía) y tipo
+  tarjeta (aspecto 1.586) para el carnet de póliza (salida 1000px de
+  ancho). Verificado con Playwright reconstruyendo el componente en
+  aislamiento: se generó una imagen de prueba con marcadores de posición,
+  se hizo zoom y arrastre, y se confirmó que el recorte final coincide
+  exactamente con lo mostrado en el marco antes de guardar — en modo claro
+  y oscuro.
+- **Editar pólizas y diagnósticos**: antes solo se podían eliminar y
+  volver a crear. Ahora cada ítem de la lista tiene un botón "Editar" que
+  abre el mismo mini-formulario de alta, precargado, con botón "Guardar
+  cambios". `api.savePatientPolicy()` ya soportaba upsert por id (RLS de
+  UPDATE ya existía desde la migración `0009`); `patient_diagnoses` no
+  tenía política de UPDATE porque el diseño original (migración `0014`)
+  asumía que el único flujo era agregar/eliminar — se agregó
+  `api.updatePatientDiagnosis()` y la **migración `0016`** con la política
+  RLS correspondiente (mismo patrón que `patient_policies_update`).
+  Verificada primero en una transacción con `set local role authenticated`
+  + `request.jwt.claims` simulados y `rollback` (household member puede
+  actualizar, un usuario de otro household no puede — 0 filas afectadas),
+  y solo después aplicada a producción con `apply_migration`.
+- **Carnet de póliza ya no se convierte a PDF**: cambio respecto a la
+  decisión transversal de P1.5. Si el archivo elegido es una imagen, pasa
+  por el recortador y se guarda como imagen; si ya es un PDF escaneado, se
+  sube tal cual (sin recorte, no aplica). La visualización en ventana
+  sobrepuesta (nunca pestaña nueva) ya estaba cubierta por el visor de
+  adjuntos existente (`src/lib/viewer.js`) desde P1.5 — no hizo falta
+  tocarlo.
+- **Bug corregido — selector de "Tipo de póliza" atascado en SOAT**: al
+  cambiar la opción elegida, el `<select>` se reconstruía desde cero (para
+  mostrar/ocultar el campo "Especificar tipo" cuando se elige "Otra…") sin
+  recordar cuál había sido la última elección real del usuario — el
+  navegador volvía a marcar la primera opción de la lista (SOAT) en cada
+  re-render. Ahora un estado explícito (`pendingPolicyTipo`) guarda el
+  valor elegido y se pasa como `selected` en cada reconstrucción.
+
+**Verificación**: `npm run build` limpio y pruebas de interacción con
+Playwright contra el recortador en aislamiento (zoom, arrastre, cancelar
+con Escape y con el botón, clamps de zoom en 100%/300%, verificación
+pixel-por-pixel de que el recorte final coincide con el encuadre
+mostrado). No se tocaron datos de pacientes reales en producción — la
+única escritura contra producción fue la migración `0016` (aditiva, sin
+efecto sobre filas existentes), verificada primero en una transacción con
+rollback. El bundle con este commit (más los 3 pendientes de antes:
+`b61a305`, `a515d18`, `01278e9`) se entregó al usuario para fusionar y
+subir a `origin/main`.
 
 ## Historial relevante de sesiones previas (resumen)
 
@@ -457,12 +685,27 @@ verificado E2E en producción salvo donde se indica lo contrario.
 9. **P1 #7 — Adjuntos en Storage: COMPLETADA** el 2026-07-15 (E2E por UI
    pendiente) y **P1 #8 — Auditoría RLS: COMPLETADA** el 2026-07-16 (ver
    secciones dedicadas arriba).
-10. **P1.5 — Edición de interfaz: COMPLETADA casi en su totalidad** el
-    2026-07-16 (tema visual, Ficha de paciente, Órdenes médicas,
-    Medicamentos, Médicos, imágenes/documentos transversal), con un bug
-    crítico de producción encontrado y corregido en el camino (ver
-    sección dedicada arriba).
-11. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
+10. **P1.5 — Edición de interfaz: COMPLETADA AL 100%** el 2026-07-16
+    (tema visual, Ficha de paciente, Órdenes médicas, Medicamentos,
+    Médicos, imágenes/documentos transversal incluido el lightbox, y
+    Pólizas migrado al helper compartido), con un bug crítico de
+    producción encontrado y corregido en el camino (ver sección dedicada
+    arriba).
+11. **P2 — Calidad para el público: 4/4 COMPLETADAS** el 2026-07-16
+    (responsive móvil, limpieza de HTML legacy, aviso médico/privacidad,
+    y estados vacíos/manejo de errores consistente — P2 #11, commit
+    `a515d18`). Ver sección dedicada arriba.
+12. **MI AUDITORIA — backlog adicional de Ficha de paciente y Órdenes:
+    COMPLETADO** el 2026-07-16 (5 ajustes en Pacientes + restructuración
+    de 5 partes en Órdenes, incluida la nueva tabla de Autorizaciones
+    mes a mes y la pestaña Flujo). Ver sección dedicada arriba.
+13. **Segunda auditoría rápida de Ficha de paciente: COMPLETADA** el
+    2026-07-17 (commit `0215e0b` + migración `0016`): recorte de imagen
+    compartido para avatar y carnet de póliza, pólizas y diagnósticos
+    editables (no solo agregar/eliminar), el carnet ya no se convierte a
+    PDF, y fix del selector de tipo de póliza que se atascaba en SOAT.
+    Ver sección dedicada arriba.
+14. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
     directorio público auditado de médicos y centros.
 
 ## Criterio de asignación de agentes de Claude
@@ -475,35 +718,39 @@ verificado E2E en producción salvo donde se indica lo contrario.
 - **Opus**: flujos que cruzan varios archivos y estados. Sin ítems
   pendientes por ahora.
 - **Sonnet**: tareas acotadas y mecánicas — configuración, UI, limpieza,
-  contenido. Incluye toda la sección P1.5 de edición de interfaz (el
-  frente grande restante) y las tareas P2.
+  contenido. P1.5, P2 y MI AUDITORIA ya están completas; sin ítems
+  numerados pendientes del plan original.
 
 ## Próximos pasos sugeridos para quien retome
 
-1. **Lightbox/descarga de imágenes y documentos** (ítem transversal del
-   plan P1.5 aún no implementado): componente único reutilizable para
-   ampliar y descargar cualquier adjunto, en vez de repetirlo por módulo.
-2. E2E corto de adjuntos "clásico" en producción si no se ha hecho desde
+Con P1.5, P2 (4/4) y MI AUDITORIA completos, no queda ningún ítem
+numerado del plan original pendiente. Lo que sigue es priorizar entre lo
+no planeado / de mantenimiento:
+
+1. E2E corto de adjuntos "clásico" en producción si no se ha hecho desde
    el cambio de imágenes/documentos: subir, ver, reemplazar y eliminar
-   (verifica la limpieza del bucket) en los módulos que aún no se
-   probaron explícitamente con el nuevo flujo (Pólizas en Pacientes).
-3. Opcional, limpieza de código (no bloqueante): migrar Pólizas (Ficha de
-   paciente) para usar `src/lib/extensibleCatalog.js` en vez de su
-   implementación inline propia del mismo patrón "Otra".
-4. Sección P2 del plan (responsive móvil, eliminar `SaludFamilia.html`
-   legacy, estados vacíos/errores consistentes, aviso de privacidad).
-5. Antes de tocar cualquier política RLS nueva, reproducir el error primero
+   (verifica la limpieza del bucket), y de paso probar por UI real el
+   backlog MI AUDITORIA (Avatar, Pólizas con aseguradora, Crónicos,
+   Autorizaciones mes a mes, pestaña Flujo) — hasta ahora solo se
+   verificó con capturas de pantalla locales, no contra producción.
+2. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
    una transacción con `rollback` (patrón usado con éxito en todos los
    E2E de seguridad de este proyecto). Ojo: `is_household_member` ahora
    vive en el schema `private`, y Supabase bloquea DELETEs directos sobre
    `storage.objects` (usar la API de Storage).
-6. Decidir qué hacer con los datos de prueba conservados, que ya
-   incluyen bastante volumen de E2E de P1.5 (18 órdenes, 3 medicamentos,
-   4 médicos, 4 centros médicos) — dejarlos como muestra o limpiarlos
-   antes del lanzamiento real.
-7. Pieza A de arquitectura (directorio público auditado) — diseño
-   detallado con Fable cuando se decida priorizarla.
+3. La base de producción está sin datos clínicos (ver "Estado de los
+   datos" arriba) — buen momento para decidir si el próximo E2E genera
+   datos de muestra a conservar o si se prueba y se limpia.
+4. Pieza A de arquitectura (directorio público auditado) — diseño
+   detallado con Fable cuando se decida priorizarla. El usuario confirmó
+   que tiene sentido invertir en esto (espera más familias usando la
+   app), pero el diseño de detalle (mecanismo de rol admin, si se
+   rastrea la procedencia de copias del directorio público al privado)
+   quedó sin cerrar — retomar solo si el usuario lo pide de nuevo.
+5. Si algún día se pasa al plan Pro de Supabase: activar "Leaked
+   password protection" (HaveIBeenPwned) en Auth — hoy rechazado por la
+   API en el plan gratuito; el mínimo de contraseña ya se subió a 8.
 
 Ver el plan de avance detallado y priorizado en
 `docs/Plan_de_Avance_MVP.docx`.

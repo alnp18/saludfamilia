@@ -38,7 +38,7 @@ export function rowToPatient(r) {
     notas: r.notas,
     // Foto del paciente (MI AUDITORIA #1) — mismo formato que patient_policies.imagen
     // ({name,type,size,path} en Storage), pero se muestra tal cual: nunca se
-    // convierte a PDF (ver processAvatarFile en files.js).
+    // convierte a PDF. Se recorta/encuadra al subirla (src/lib/imageCropper.js).
     foto: r.foto,
     // Columna legada: ya no se lee/escribe desde la UI (ver P1.5 — el modo
     // claro/oscuro es ahora un único control general en el header, nunca una
@@ -176,9 +176,8 @@ export async function deletePatientPolicy(id) {
 
 // ─────────────────────────────────────────
 // PATIENT DIAGNOSES (condiciones crónicas — MI AUDITORIA #5)
-// Solo carga manual del código CIE10 por ahora (ver migración 0014); no
-// hay update porque el único flujo hoy es agregar y, si hace falta,
-// eliminar y volver a agregar.
+// Solo carga manual del código CIE10 por ahora (ver migración 0014).
+// Editable desde la auditoría 2026-07-17 (ver migración 0016 — RLS update).
 // ─────────────────────────────────────────
 function rowToDiagnosis(r) {
   return {
@@ -205,6 +204,20 @@ export async function addPatientDiagnosis(diagnosis, householdId, patientId) {
     descripcion: diagnosis.descripcion || null,
   };
   const { data, error } = await supabase.from('patient_diagnoses').insert(row).select().single();
+  if (error) throw error;
+  return rowToDiagnosis(data);
+}
+
+// Editar un diagnóstico existente (auditoría 2026-07-17): antes solo se
+// podía eliminar y volver a agregar. Requiere la migración 0016
+// (patient_diagnoses_update), que agrega la política RLS de UPDATE que no
+// existía porque el único flujo original era agregar/eliminar.
+export async function updatePatientDiagnosis(id, diagnosis) {
+  const row = {
+    codigo_cie10: diagnosis.codigoCie10,
+    descripcion: diagnosis.descripcion || null,
+  };
+  const { data, error } = await supabase.from('patient_diagnoses').update(row).eq('id', id).select().single();
   if (error) throw error;
   return rowToDiagnosis(data);
 }

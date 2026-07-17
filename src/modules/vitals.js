@@ -2,6 +2,8 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
 import { esc, fmtDate, today } from '../lib/utils.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { Icons } from '../lib/icons.js';
 
 const VITAL_FIELDS = [
   { key: 'peso', label: 'Peso', unit: 'kg', color: '#14b8a6', low: 40, high: 150 },
@@ -59,20 +61,37 @@ export async function render() {
         <div id="vitals-table-body" style="overflow-x:auto"></div>
       </div>
     </div>
-    <div id="vitals-empty" style="display:none"><div class="empty-state"><h3>Sin registros aún</h3><p>Comienza registrando los signos vitales del paciente para ver su evolución.</p><button class="btn btn-primary" id="btn-first-vital">Primer registro</button></div></div>
+    <div id="vitals-empty" style="display:none"></div>
   `;
   document.getElementById('btn-new-vital').addEventListener('click', () => openVitalModal());
-  document.getElementById('btn-first-vital')?.addEventListener('click', () => openVitalModal());
+
+  const emptyEl = document.getElementById('vitals-empty');
 
   if (!state.activePatient) {
-    document.getElementById('vitals-kpi').innerHTML = '';
+    emptyEl.innerHTML = emptyStateHtml({ icon: Icons.users, title: 'Selecciona un paciente' });
+    emptyEl.style.display = 'flex';
     return;
   }
 
-  const records = (await api.listVitalsByPatient(state.activePatient.id)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  let records;
+  try {
+    records = (await api.listVitalsByPatient(state.activePatient.id)).sort((a, b) => a.fecha.localeCompare(b.fecha));
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar los signos vitales', 'err');
+    emptyEl.innerHTML = errorStateHtml({ retryId: 'btn-retry-vitals' });
+    emptyEl.style.display = 'flex';
+    document.getElementById('btn-retry-vitals').addEventListener('click', () => render());
+    return;
+  }
 
   if (!records.length) {
-    document.getElementById('vitals-empty').style.display = 'flex';
+    emptyEl.innerHTML = emptyStateHtml({
+      title: 'Sin registros aún',
+      message: 'Comienza registrando los signos vitales del paciente para ver su evolución.',
+      action: { id: 'btn-first-vital', label: 'Primer registro' },
+    });
+    emptyEl.style.display = 'flex';
+    document.getElementById('btn-first-vital').addEventListener('click', () => openVitalModal());
     if (pendingOptions?.openModal) { pendingOptions = null; openVitalModal(); }
     return;
   }
@@ -257,7 +276,14 @@ function renderVitalsTable(records) {
 
 async function openVitalModal(id) {
   let r = null;
-  if (id) r = (await api.listVitalsByPatient(state.activePatient.id)).find(v => v.id === id);
+  if (id) {
+    try {
+      r = (await api.listVitalsByPatient(state.activePatient.id)).find(v => v.id === id);
+    } catch (err) {
+      showToast(err.message || 'No se pudo abrir el registro', 'err');
+      return;
+    }
+  }
 
   showModal(
     id ? 'Editar registro de signos vitales' : 'Nuevo registro de signos vitales',
@@ -338,7 +364,11 @@ async function saveVitalForm(editId) {
 
 async function deleteVitalConfirm(id) {
   if (!confirm('¿Eliminar este registro de signos vitales?')) return;
-  await api.deleteVital(id);
-  showToast('Registro eliminado', 'warn');
-  render();
+  try {
+    await api.deleteVital(id);
+    showToast('Registro eliminado', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el registro', 'err');
+  }
 }

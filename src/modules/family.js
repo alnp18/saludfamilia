@@ -4,6 +4,7 @@ import * as xport from '../lib/exportImport.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { showLegalModal } from '../lib/legal.js';
 import { esc, avatarColor, fmtDate } from '../lib/utils.js';
+import { errorStateHtml } from '../lib/emptyState.js';
 
 /**
  * Vista Familia: quiénes comparten este household, invitaciones (solo el
@@ -34,6 +35,8 @@ export async function render() {
     members = await api.listHouseholdMembers(state.household.id);
   } catch (err) {
     showToast(err.message || 'Error al cargar los miembros', 'err');
+    el.innerHTML = errorStateHtml({ retryId: 'btn-retry-family' });
+    document.getElementById('btn-retry-family').addEventListener('click', () => render());
     return;
   }
 

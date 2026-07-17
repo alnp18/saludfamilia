@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc } from '../lib/utils.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 
 export async function render() {
   const container = document.getElementById('view-centers');
@@ -16,14 +17,24 @@ export async function render() {
   `;
   document.getElementById('btn-new-center').addEventListener('click', () => openCenterModal());
 
-  const centers = await api.listCenters(state.household.id);
   const el = document.getElementById('centers-content');
+  let centers;
+  try {
+    centers = await api.listCenters(state.household.id);
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar los centros médicos', 'err');
+    el.innerHTML = errorStateHtml({ retryId: 'btn-retry-centers' });
+    document.getElementById('btn-retry-centers').addEventListener('click', () => render());
+    return;
+  }
 
   if (!centers.length) {
-    el.innerHTML = `<div class="empty-state">
-      <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
-      <h3>Sin centros médicos</h3><p>Agrega los centros y clínicas que uses frecuentemente.</p>
-      <button class="btn btn-primary" id="btn-new-center-empty" style="margin-top:8px">Agregar primer centro</button></div>`;
+    el.innerHTML = emptyStateHtml({
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>',
+      title: 'Sin centros médicos',
+      message: 'Agrega los centros y clínicas que uses frecuentemente.',
+      action: { id: 'btn-new-center-empty', label: 'Agregar primer centro' },
+    });
     document.getElementById('btn-new-center-empty').addEventListener('click', () => openCenterModal());
     return;
   }
@@ -99,7 +110,11 @@ async function saveCenterForm(editId) {
 
 async function deleteCenterConfirm(id) {
   if (!confirm('¿Eliminar este centro médico?')) return;
-  await api.deleteCenter(id);
-  showToast('Centro eliminado', 'warn');
-  render();
+  try {
+    await api.deleteCenter(id);
+    showToast('Centro eliminado', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el centro médico', 'err');
+  }
 }

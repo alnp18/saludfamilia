@@ -3,6 +3,9 @@ import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
 import { esc, initials, avatarColor, fmtDate, today, daysFrom, calcAge } from '../lib/utils.js';
 import { hydrateAvatar } from '../lib/avatar.js';
+import { showToast } from '../lib/modal.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { Icons } from '../lib/icons.js';
 
 let calYear, calMonth;
 let clockTimer = null;
@@ -83,24 +86,31 @@ export async function render() {
   if (!container) return;
 
   if (!state.activePatient) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <div class="es-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87m-4-12a4 4 0 010 7.75"/></svg></div>
-        <h3>Ningún paciente seleccionado</h3>
-        <p>Crea o selecciona un paciente para ver su dashboard.</p>
-        <button class="btn btn-primary" id="dash-goto-patients" style="margin-top:8px">Gestionar pacientes</button>
-      </div>`;
+    container.innerHTML = emptyStateHtml({
+      icon: Icons.users,
+      title: 'Ningún paciente seleccionado',
+      message: 'Crea o selecciona un paciente para ver su dashboard.',
+      action: { id: 'dash-goto-patients', label: 'Gestionar pacientes' },
+    });
     document.getElementById('dash-goto-patients')?.addEventListener('click', () => goViewCb?.('patients'));
     return;
   }
 
   const patient = state.activePatient;
-  const [orders, meds, doctors, centers] = await Promise.all([
-    api.listOrdersByPatient(patient.id),
-    api.listMedsByPatient(patient.id),
-    api.listDoctors(state.household.id),
-    api.listCenters(state.household.id),
-  ]);
+  let orders, meds, doctors, centers;
+  try {
+    [orders, meds, doctors, centers] = await Promise.all([
+      api.listOrdersByPatient(patient.id),
+      api.listMedsByPatient(patient.id),
+      api.listDoctors(state.household.id),
+      api.listCenters(state.household.id),
+    ]);
+  } catch (err) {
+    showToast(err.message || 'No se pudo cargar el dashboard', 'err');
+    container.innerHTML = errorStateHtml({ retryId: 'btn-retry-dashboard' });
+    document.getElementById('btn-retry-dashboard').addEventListener('click', () => render());
+    return;
+  }
   const docMap = Object.fromEntries(doctors.map(d => [d.id, d]));
   orders.forEach(o => { o._stage = o._stage || calcStage(o); });
 

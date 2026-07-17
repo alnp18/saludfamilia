@@ -137,44 +137,24 @@ export async function imageToPdfDataUrl(dataUrl) {
   return doc.output('datauristring');
 }
 
-const AVATAR_MAX_DIM = 640; // px, lado más largo — suficiente para avatares circulares/miniaturas
-
 /**
- * Procesa una foto de perfil de paciente (MI AUDITORIA #1): a diferencia de
- * processUploadFile, esto NUNCA convierte a PDF — la foto se muestra tal
- * cual como imagen. Solo valida tipo/tamaño y la redimensiona en el cliente
- * si es más grande que AVATAR_MAX_DIM, para no acumular fotos pesadas en
- * Storage. Devuelve {name, type, data} listo para uploadAttachment, o null
- * si el archivo no es válido (ya se avisó con un toast).
+ * Valida que `file` sea una imagen dentro del tamaño máximo permitido.
+ * Muestra un toast y devuelve `false` si no pasa la validación — el
+ * llamador simplemente corta el flujo en ese caso (no sigue a
+ * blobToDataUrl/al recortador). Usado antes de abrir el recortador de
+ * imagen (src/lib/imageCropper.js) tanto para la foto de perfil del
+ * paciente como para el carnet de una póliza.
  */
-export async function processAvatarFile(file) {
+export function validateImageFile(file, maxMB = MAX_FILE_MB) {
   if (!file.type.startsWith('image/')) {
-    showToast('La foto de perfil debe ser una imagen', 'err');
-    return null;
+    showToast('El archivo debe ser una imagen', 'err');
+    return false;
   }
-  if (file.size > MAX_FILE_MB * 1024 * 1024) {
-    showToast(`Archivo muy grande (máx. ${MAX_FILE_MB}MB)`, 'err');
-    return null;
+  if (file.size > maxMB * 1024 * 1024) {
+    showToast(`Archivo muy grande (máx. ${maxMB}MB)`, 'err');
+    return false;
   }
-  const dataUrl = await blobToDataUrl(file);
-  try {
-    const img = await loadImage(dataUrl);
-    if (img.width <= AVATAR_MAX_DIM && img.height <= AVATAR_MAX_DIM) {
-      return { name: file.name, type: file.type, data: dataUrl };
-    }
-    const ratio = AVATAR_MAX_DIM / Math.max(img.width, img.height);
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.round(img.width * ratio);
-    canvas.height = Math.round(img.height * ratio);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-    const resized = canvas.toDataURL('image/jpeg', 0.85);
-    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
-    return { name, type: 'image/jpeg', data: resized };
-  } catch {
-    // Si por algún motivo no se pudo redimensionar, se sube la imagen tal
-    // cual en vez de bloquear al usuario.
-    return { name: file.name, type: file.type, data: dataUrl };
-  }
+  return true;
 }
 
 /**

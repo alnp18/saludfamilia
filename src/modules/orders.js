@@ -7,6 +7,8 @@ import { openViewOverlay, closeViewOverlay } from '../lib/viewModeOverlay.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { Icons } from '../lib/icons.js';
 
 const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamentos/Insumos/Terapias', 'Examen', 'Laboratorio', 'Otro'];
 const STAGE_ORDER = ['A', 'B', 'C', 'D', 'Finalizado'];
@@ -100,7 +102,7 @@ export async function render() {
     espSelect.innerHTML = '';
     docSelect.innerHTML = '';
     tipoSelect.innerHTML = '';
-    list.innerHTML = `<div class="empty-state"><div class="es-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><h3>Selecciona un paciente</h3></div>`;
+    list.innerHTML = emptyStateHtml({ icon: Icons.users, title: 'Selecciona un paciente' });
     flow.innerHTML = '';
     document.getElementById('sb-badge-orders').style.display = 'none';
     return;
@@ -113,10 +115,19 @@ export async function render() {
   list.style.display = ordersViewMode === 'flujo' ? 'none' : '';
   flow.style.display = ordersViewMode === 'flujo' ? '' : 'none';
 
-  const [orders, doctors] = await Promise.all([
-    api.listOrdersByPatient(state.activePatient.id),
-    api.listDoctors(state.household.id),
-  ]);
+  let orders, doctors;
+  try {
+    [orders, doctors] = await Promise.all([
+      api.listOrdersByPatient(state.activePatient.id),
+      api.listDoctors(state.household.id),
+    ]);
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar las órdenes', 'err');
+    const errHtml = errorStateHtml({ retryId: 'btn-retry-orders' });
+    if (ordersViewMode === 'flujo') flow.innerHTML = errHtml; else list.innerHTML = errHtml;
+    document.getElementById('btn-retry-orders').addEventListener('click', () => render());
+    return;
+  }
   const docMap = Object.fromEntries(doctors.map(d => [d.id, d]));
 
   const pendingCount = orders.filter(o => o._stage === 'A' || o._stage === 'B').length;
@@ -190,12 +201,12 @@ export async function render() {
   });
 
   if (!filtered.length) {
-    list.innerHTML = `<div class="empty-state">
-      <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
-      <h3>${orders.length ? 'Sin resultados para este filtro' : 'Sin órdenes registradas'}</h3>
-      <p>${orders.length ? 'Prueba con otro filtro de etapa o especialidad.' : 'Registra la primera orden médica de ' + esc(state.activePatient.nombre) + '.'}</p>
-      ${!orders.length ? '<button class="btn btn-primary" id="btn-new-order-empty" style="margin-top:8px">Nueva orden</button>' : ''}
-    </div>`;
+    list.innerHTML = emptyStateHtml({
+      icon: Icons.clipboard,
+      title: orders.length ? 'Sin resultados para este filtro' : 'Sin órdenes registradas',
+      message: orders.length ? 'Prueba con otro filtro de etapa o especialidad.' : 'Registra la primera orden médica de ' + esc(state.activePatient.nombre) + '.',
+      action: orders.length ? null : { id: 'btn-new-order-empty', label: 'Nueva orden' },
+    });
     document.getElementById('btn-new-order-empty')?.addEventListener('click', () => openOrderWizard());
   } else {
     list.innerHTML = filtered.map(o => renderOrderCard(o, docMap)).join('');
@@ -271,12 +282,12 @@ function flowGroupKey(o) { return `${o.fechaOrden || 'sin-fecha'}|${o.medicoId |
 
 function renderFlowView(orders, docMap, container) {
   if (!orders.length) {
-    container.innerHTML = `<div class="empty-state">
-      <svg width="48" height="48" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.2"><path stroke-linecap="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414A1 1 0 0119 9.414V19a2 2 0 01-2 2z"/></svg>
-      <h3>Sin órdenes registradas</h3>
-      <p>Registra la primera orden médica de ${esc(state.activePatient.nombre)}.</p>
-      <button class="btn btn-primary" id="btn-new-order-empty-flow" style="margin-top:8px">Nueva orden</button>
-    </div>`;
+    container.innerHTML = emptyStateHtml({
+      icon: Icons.clipboard,
+      title: 'Sin órdenes registradas',
+      message: `Registra la primera orden médica de ${esc(state.activePatient.nombre)}.`,
+      action: { id: 'btn-new-order-empty-flow', label: 'Nueva orden' },
+    });
     document.getElementById('btn-new-order-empty-flow')?.addEventListener('click', () => openOrderWizard());
     return;
   }
@@ -345,11 +356,15 @@ async function deleteOrderConfirm(id) {
     return;
   }
   if (!confirm('¿Eliminar esta orden médica? Se perderá todo su seguimiento.')) return;
-  const paths = files.attachmentPathsOfOrder(o);
-  await api.deleteOrder(id);
-  files.removeAttachments(paths);
-  showToast('Orden eliminada', 'warn');
-  render();
+  try {
+    const paths = files.attachmentPathsOfOrder(o);
+    await api.deleteOrder(id);
+    files.removeAttachments(paths);
+    showToast('Orden eliminada', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar la orden', 'err');
+  }
 }
 
 // ─────────────────────────────────────────
@@ -463,13 +478,19 @@ function renderOrderReadView(o, docMap, centerMap, authList) {
 async function openOrderModal(id) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
-  const [o, doctors, centers] = await Promise.all([
-    api.getOrder(id), api.listDoctors(state.household.id), api.listCenters(state.household.id),
-  ]);
+  let o, doctors, centers, authList;
+  try {
+    [o, doctors, centers] = await Promise.all([
+      api.getOrder(id), api.listDoctors(state.household.id), api.listCenters(state.household.id),
+    ]);
+    authList = isAuthTableType(o.tipoOrden) ? await api.listOrderAuthorizations(id) : [];
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir la orden', 'err');
+    return;
+  }
   const docMap = Object.fromEntries(doctors.map(d => [d.id, d]));
   const centerMap = Object.fromEntries(centers.map(c => [c.id, c]));
   const doc = docMap[o.medicoId];
-  const authList = isAuthTableType(o.tipoOrden) ? await api.listOrderAuthorizations(id) : [];
 
   const { root } = openViewOverlay({
     title: o.tipoOrden || 'Orden médica',
@@ -570,17 +591,22 @@ async function openOrderWizard(id, prefill, forceTab) {
 
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
-  const doctors = await api.listDoctors(state.household.id);
-  const centers = await api.listCenters(state.household.id);
-  let o = null;
-  if (id) {
-    o = await api.getOrder(id);
-    if (o.orden_archivo) orderFiles.orden = o.orden_archivo;
-    if (o.solicitud_imagen) orderFiles.solicitud = o.solicitud_imagen;
-    if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
-    originalStoredPaths = files.attachmentPathsOfOrder(o);
-    currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
-    if (isAuthTableType(o.tipoOrden)) authRows = await api.listOrderAuthorizations(id);
+  let doctors, centers, o = null;
+  try {
+    doctors = await api.listDoctors(state.household.id);
+    centers = await api.listCenters(state.household.id);
+    if (id) {
+      o = await api.getOrder(id);
+      if (o.orden_archivo) orderFiles.orden = o.orden_archivo;
+      if (o.solicitud_imagen) orderFiles.solicitud = o.solicitud_imagen;
+      if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
+      originalStoredPaths = files.attachmentPathsOfOrder(o);
+      currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
+      if (isAuthTableType(o.tipoOrden)) authRows = await api.listOrderAuthorizations(id);
+    }
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir el asistente de la orden', 'err');
+    return;
   }
   // Este tipo de orden no tiene pestaña D — si la etapa alcanzada fuera
   // "D" o "Finalizado" (dato legado de antes de esta fusión de tipos), se

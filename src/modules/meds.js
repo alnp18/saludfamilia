@@ -3,6 +3,8 @@ import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { Icons } from '../lib/icons.js';
 
 // Vía de administración: fijas + "Otra…" extensible (ver nota transversal
 // del plan — mismo patrón que Pólizas en Pacientes y Especialidad en
@@ -58,26 +60,40 @@ export async function render() {
   document.getElementById('btn-show-history').addEventListener('click', toggleMedsHistory);
 
   if (!state.activePatient) {
-    document.getElementById('meds-active-section').innerHTML = `<div class="empty-state"><h3>Selecciona un paciente</h3><button class="btn btn-primary" id="meds-goto-patients" style="margin-top:8px">Ir a Pacientes</button></div>`;
+    document.getElementById('meds-active-section').innerHTML = emptyStateHtml({
+      icon: Icons.users,
+      title: 'Selecciona un paciente',
+      action: { id: 'meds-goto-patients', label: 'Ir a Pacientes' },
+    });
     document.getElementById('meds-goto-patients')?.addEventListener('click', () => window.dispatchEvent(new CustomEvent('sf:goto', { detail: 'patients' })));
     return;
   }
   document.getElementById('meds-sub').textContent = 'Medicamentos de ' + state.activePatient.nombre;
 
-  const all = await api.listMedsByPatient(state.activePatient.id);
+  const grid = document.getElementById('meds-active-grid');
+  let all;
+  try {
+    all = await api.listMedsByPatient(state.activePatient.id);
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar los medicamentos', 'err');
+    grid.innerHTML = errorStateHtml({ retryId: 'btn-retry-meds', style: 'grid-column:1/-1' });
+    document.getElementById('btn-retry-meds').addEventListener('click', () => render());
+    return;
+  }
   const active = all.filter(m => m.activo);
   const inactive = all.filter(m => !m.activo);
 
   document.getElementById('meds-active-count').textContent = active.length;
   document.getElementById('btn-show-history').style.display = inactive.length ? 'flex' : 'none';
 
-  const grid = document.getElementById('meds-active-grid');
   if (!active.length) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
-      <h3>Sin medicamentos activos</h3>
-      <p>Registra el primer medicamento de ${esc(state.activePatient.nombre)}.</p>
-      <button class="btn btn-primary" id="btn-new-med-empty" style="margin-top:8px">Agregar medicamento</button>
-    </div>`;
+    grid.innerHTML = emptyStateHtml({
+      icon: Icons.pill,
+      title: 'Sin medicamentos activos',
+      message: `Registra el primer medicamento de ${esc(state.activePatient.nombre)}.`,
+      action: { id: 'btn-new-med-empty', label: 'Agregar medicamento' },
+      style: 'grid-column:1/-1',
+    });
     document.getElementById('btn-new-med-empty').addEventListener('click', () => openMedModal());
   } else {
     grid.innerHTML = active.map(renderMedCard).join('');
@@ -139,12 +155,21 @@ async function toggleMedsHistory() {
 }
 
 async function renderMedsHistory() {
-  const all = await api.listMedsByPatient(state.activePatient.id);
+  const listEl = document.getElementById('meds-history-list');
+  let all;
+  try {
+    all = await api.listMedsByPatient(state.activePatient.id);
+  } catch (err) {
+    showToast(err.message || 'No se pudo cargar el historial', 'err');
+    listEl.innerHTML = errorStateHtml({ retryId: 'btn-retry-meds-history', style: 'padding:24px 0' });
+    document.getElementById('btn-retry-meds-history').addEventListener('click', renderMedsHistory);
+    return;
+  }
   const inactive = all.filter(m => !m.activo).sort((a, b) => (b.version || 1) - (a.version || 1));
   document.getElementById('meds-hist-count').textContent = inactive.length;
 
   if (!inactive.length) {
-    document.getElementById('meds-history-list').innerHTML = `<div class="empty-state" style="padding:24px 0"><p>Sin registros en el historial aún</p></div>`;
+    listEl.innerHTML = emptyStateHtml({ title: 'Sin registros en el historial aún', style: 'padding:24px 0' });
     return;
   }
 
@@ -261,12 +286,17 @@ function renderHorariosBuilder(freq) {
 }
 
 async function openMedModal(id) {
-  let m = null;
-  if (id) m = await api.getMed(id);
+  let m = null, customVia;
+  try {
+    if (id) m = await api.getMed(id);
+    customVia = await api.listCatalogOptions(state.household.id, CATEGORIA_VIA);
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir el formulario del medicamento', 'err');
+    return;
+  }
   const isEdit = !!m;
   const willVersion = isEdit && m.activo;
 
-  const customVia = await api.listCatalogOptions(state.household.id, CATEGORIA_VIA);
   const knownVia = [...VIA_OPTIONS_FIJAS, ...customVia];
   // Compatibilidad: si el vía guardado no está en las fijas ni en el
   // catálogo (por ejemplo, un registro viejo con el "Otra" plano de antes
@@ -372,15 +402,23 @@ async function saveMedForm(editId) {
 
 async function suspendMedConfirm(id) {
   if (!confirm('¿Suspender este medicamento? Se moverá al historial pero sus datos quedarán guardados.')) return;
-  const m = await api.getMed(id);
-  await api.updateMed(id, { ...m, activo: false, fechaFin: m.fechaFin || today() }, state.household.id, state.activePatient.id);
-  showToast('Medicamento suspendido', 'warn');
-  render();
+  try {
+    const m = await api.getMed(id);
+    await api.updateMed(id, { ...m, activo: false, fechaFin: m.fechaFin || today() }, state.household.id, state.activePatient.id);
+    showToast('Medicamento suspendido', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al suspender el medicamento', 'err');
+  }
 }
 
 async function deleteMedConfirm(id) {
   if (!confirm('¿Eliminar este medicamento permanentemente? Esta acción no se puede deshacer.')) return;
-  await api.deleteMed(id);
-  showToast('Medicamento eliminado', 'warn');
-  render();
+  try {
+    await api.deleteMed(id);
+    showToast('Medicamento eliminado', 'warn');
+    render();
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el medicamento', 'err');
+  }
 }

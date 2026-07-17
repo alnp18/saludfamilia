@@ -8,6 +8,8 @@ import { esc, initials, avatarColor, calcAge, fmtDate } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/avatar.js';
 import { openViewOverlay } from '../lib/viewModeOverlay.js';
+import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { openImageCropper } from '../lib/imageCropper.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -18,31 +20,44 @@ export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
 // Especialidad (Médicos) — ver nota transversal del plan (src/lib/extensibleCatalog.js).
 const POLICY_TYPES_FIJOS = ['SOAT', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'Vida', 'Dental'];
 const CATEGORIA_POLIZA = 'poliza_tipo';
+// Proporción tipo tarjeta (auditoría 2026-07-17 — el carnet ya no se
+// convierte a PDF, se recorta como imagen con este marco guía).
+const POLICY_IMAGE_ASPECT = 1.586;
 const PARENTESCO_OPTIONS = [
   'Madre/Padre', 'Pareja/Cónyuge', 'Hijo/Hija', 'Hermano/Hermana', 'Abuela/Abuelo', 'Nieto/Nieta',
   'Tío/Tía', 'Sobrino/Sobrina', 'Cuidador', 'Familiar', 'Representante asignado', 'Otro',
 ];
 
-// Estado del sub-formulario "Agregar póliza" dentro del modal de ficha de
-// paciente. Es un solo modal (ver modal.js), así que este mini-formulario
-// vive inline (no como un segundo modal apilado) y persiste entre los
-// re-renders de la sección de pólizas.
+// Estado del sub-formulario "Agregar/Editar póliza" dentro del modal de
+// ficha de paciente. Es un solo modal (ver modal.js), así que este
+// mini-formulario vive inline (no como un segundo modal apilado) y
+// persiste entre los re-renders de la sección de pólizas.
 let policyFormOpen = false;
-let pendingPolicyOtra = false;
-let pendingPolicyImage = null; // { name, type, data } en memoria hasta guardar
+let editingPolicy = null;      // objeto completo de la póliza si se está editando una existente; null si es nueva (auditoría 2026-07-17)
+// Valor actual del <select> de tipo. Se guarda explícito (no solo un flag
+// "es Otra") porque el <select> se reconstruye desde cero en cada
+// re-render: si `selected` no refleja la última elección del usuario, el
+// navegador vuelve a marcar la primera opción (bug reportado 2026-07-17 —
+// cambiar de tipo no dejaba salir de "SOAT").
+let pendingPolicyTipo = '';
+let pendingPolicyImage = null;          // { name, type, data } recién elegida (y recortada, si era imagen), sin subir
+let pendingPolicyImageRemoved = false;  // al editar: se quitó la imagen existente sin reemplazarla
 
 // Foto de perfil del paciente (MI AUDITORIA #1). Igual que con las pólizas,
 // solo se puede subir en edición (se necesita el id del paciente para la
 // ruta en Storage) — en creación se avisa que se puede agregar después.
 let currentAvatarFoto = null;   // { name, type, size, path } ya guardado, o null
-let pendingAvatarImage = null;  // { name, type, data } recién elegido, sin subir
+let pendingAvatarImage = null;  // { name, type, data } recién elegido y recortado, sin subir
 let avatarRemoved = false;      // el usuario pidió quitar la foto actual
 
 // Condiciones crónicas (MI AUDITORIA #5). El checkbox solo muestra/oculta
 // la sección (lista + mini-formulario de alta) — nunca borra nada por sí
 // mismo; los diagnósticos se quitan uno por uno con su botón de eliminar.
+// Desde la auditoría 2026-07-17 también pueden editarse (antes solo
+// agregar/eliminar).
 let cronicoSectionOpen = null; // null = aún no se sabe (se decide al cargar según si ya tiene diagnósticos)
-let cronicoAddOpen = false;    // mini-formulario "+ Agregar diagnóstico" abierto
+let cronicoAddOpen = false;    // mini-formulario "+ Agregar diagnóstico" (alta o edición) abierto
+let editingDiagnosis = null;   // objeto completo si se edita uno existente; null si es nuevo
 
 export async function render() {
   const container = document.getElementById('view-patients');
@@ -60,17 +75,26 @@ export async function render() {
   `;
   document.getElementById('btn-new-patient').addEventListener('click', () => openPatientModal());
 
-  const patients = await api.listPatients(state.household.id);
+  const grid = document.getElementById('patients-grid');
+  let patients;
+  try {
+    patients = await api.listPatients(state.household.id);
+  } catch (err) {
+    showToast(err.message || 'No se pudieron cargar los pacientes', 'err');
+    grid.innerHTML = errorStateHtml({ retryId: 'btn-retry-patients', style: 'grid-column:1/-1' });
+    document.getElementById('btn-retry-patients').addEventListener('click', () => render());
+    return;
+  }
   document.getElementById('sb-badge-patients').textContent = patients.length;
 
-  const grid = document.getElementById('patients-grid');
   if (!patients.length) {
-    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
-      <div class="es-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87m-4-12a4 4 0 010 7.75"/></svg></div>
-      <h3>Sin pacientes registrados</h3>
-      <p>Agrega el primer paciente para comenzar a gestionar su información médica.</p>
-      <button class="btn btn-primary" id="btn-new-patient-empty" style="margin-top:8px">Agregar primer paciente</button>
-    </div>`;
+    grid.innerHTML = emptyStateHtml({
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87m-4-12a4 4 0 010 7.75"/></svg>',
+      title: 'Sin pacientes registrados',
+      message: 'Agrega el primer paciente para comenzar a gestionar su información médica.',
+      action: { id: 'btn-new-patient-empty', label: 'Agregar primer paciente' },
+      style: 'grid-column:1/-1',
+    });
     document.getElementById('btn-new-patient-empty').addEventListener('click', () => openPatientModal());
     return;
   }
@@ -134,11 +158,17 @@ function pvField(label, value) {
  * un segundo formulario duplicado.
  */
 async function openPatientViewMode(id) {
-  const [patient, policies, diagnoses] = await Promise.all([
-    api.getPatient(id),
-    api.listPatientPolicies(id),
-    api.listPatientDiagnoses(id),
-  ]);
+  let patient, policies, diagnoses;
+  try {
+    [patient, policies, diagnoses] = await Promise.all([
+      api.getPatient(id),
+      api.listPatientPolicies(id),
+      api.listPatientDiagnoses(id),
+    ]);
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir la ficha del paciente', 'err');
+    return;
+  }
   const age = patient.fechaNacimiento ? calcAge(patient.fechaNacimiento) + ' años' : null;
   const ce = patient.contactoEmergencia;
   const ceNombre = ce
@@ -220,13 +250,16 @@ async function openPatientViewMode(id) {
 function openPatientModal(id) {
   const editing = !!id;
   policyFormOpen = false;
-  pendingPolicyOtra = false;
+  editingPolicy = null;
+  pendingPolicyTipo = '';
   pendingPolicyImage = null;
+  pendingPolicyImageRemoved = false;
   currentAvatarFoto = null;
   pendingAvatarImage = null;
   avatarRemoved = false;
   cronicoSectionOpen = null;
   cronicoAddOpen = false;
+  editingDiagnosis = null;
   showModal(
     editing ? 'Editar paciente' : 'Nuevo paciente',
     `<div class="form-body">
@@ -352,16 +385,24 @@ async function renderAvatarSection(patient) {
     hydrateAvatar(document.getElementById('pf-avatar-preview'), { id: patient.id, foto: currentAvatarFoto, nombre: patient.nombre });
   }
 
+  // Auditoría 2026-07-17: la foto siempre pasa por el recortador antes de
+  // guardarse, para poder encuadrarla al formato circular del avatar (antes
+  // se subía tal cual, solo redimensionada si era muy grande).
   const handleFile = async (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-    const processed = await files.processAvatarFile(file);
     e.target.value = '';
-    if (processed) {
-      pendingAvatarImage = processed;
-      avatarRemoved = false;
-      renderAvatarSection(patient);
-    }
+    if (!file || !files.validateImageFile(file)) return;
+    const dataUrl = await files.blobToDataUrl(file);
+    const cropped = await openImageCropper(dataUrl, {
+      shape: 'circle',
+      outputWidth: 480,
+      title: 'Ajustar foto de perfil',
+    });
+    if (!cropped) return; // el usuario canceló el recorte
+    const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+    pendingAvatarImage = { name, type: 'image/jpeg', data: cropped };
+    avatarRemoved = false;
+    renderAvatarSection(patient);
   };
   document.getElementById('pf-avatar-file').addEventListener('change', handleFile);
   document.getElementById('pf-avatar-cam').addEventListener('change', handleFile);
@@ -494,11 +535,18 @@ async function renderPoliciesSection(patientId) {
       </div>
       <div class="policy-actions">
         ${pol.imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-policy="${pol.id}">Ver carnet</button>` : ''}
+        <button type="button" class="btn btn-sm btn-icon" data-edit-policy="${pol.id}" title="Editar">
+          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
         <button type="button" class="btn btn-sm btn-icon btn-danger" data-delete-policy="${pol.id}" title="Eliminar">
           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
         </button>
       </div>
     </div>`).join('') : `<p style="font-size:12.5px;color:var(--ts);margin:0 0 8px">Sin pólizas registradas.</p>`;
+
+  const isOtra = pendingPolicyTipo === OTRA_VALUE;
+  const hasExistingImage = !!editingPolicy?.imagen && !pendingPolicyImageRemoved && !pendingPolicyImage;
+  const hasPendingImage = !!pendingPolicyImage;
 
   container.innerHTML = `
     <div id="pf-policies-list">${listHtml}</div>
@@ -506,31 +554,35 @@ async function renderPoliciesSection(patientId) {
       <div class="form-row cols-2" style="margin-top:8px">
         <div class="form-field">
           <label class="fl">Tipo de póliza</label>
-          <select class="fi" id="pf-policy-tipo">${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyOtra ? OTRA_VALUE : '')}</select>
+          <select class="fi" id="pf-policy-tipo">${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyTipo)}</select>
         </div>
-        <div class="form-field ${pendingPolicyOtra ? '' : 'hidden'}">
+        <div class="form-field ${isOtra ? '' : 'hidden'}">
           <label class="fl">Especificar tipo</label>
-          <input class="fi" id="pf-policy-tipo-otra" type="text" placeholder="Ej: Cooperativa X"/>
+          <input class="fi" id="pf-policy-tipo-otra" type="text" placeholder="Ej: Cooperativa X" value="${isOtra && editingPolicy ? esc(editingPolicy.tipo) : ''}"/>
         </div>
         <div class="form-field">
           <label class="fl">Número de póliza</label>
-          <input class="fi" id="pf-policy-numero" type="text"/>
+          <input class="fi" id="pf-policy-numero" type="text" value="${editingPolicy ? esc(editingPolicy.numeroPoliza || '') : ''}"/>
         </div>
         <div class="form-field">
           <label class="fl">Nombre de la aseguradora</label>
-          <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…"/>
+          <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…" value="${editingPolicy ? esc(editingPolicy.aseguradora || '') : ''}"/>
         </div>
-        <div class="form-field">
-          <label class="fl">Foto o PDF del carnet</label>
-          <div style="display:flex;gap:6px">
-            <input class="fi" id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="flex:1"/>
+        <div class="form-field span2">
+          <label class="fl">Foto del carnet (o PDF ya escaneado)</label>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <label class="btn btn-sm" for="pf-policy-imagen" style="cursor:pointer">${hasExistingImage || hasPendingImage ? 'Reemplazar' : 'Subir'} imagen</label>
+            <input id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none"/>
             <button type="button" class="btn btn-sm btn-icon" id="pf-policy-imagen-cam-btn" title="Tomar foto"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+            <input type="file" id="pf-policy-imagen-cam" accept="image/*" capture="environment" style="display:none"/>
+            ${hasExistingImage ? '<button type="button" class="btn btn-sm btn-ghost" id="pf-policy-imagen-view-btn">Ver actual</button>' : ''}
+            ${(hasExistingImage || hasPendingImage) ? '<button type="button" class="btn btn-sm" id="pf-policy-imagen-remove-btn">Quitar</button>' : ''}
           </div>
-          <input type="file" id="pf-policy-imagen-cam" accept="image/*" capture="environment" style="display:none"/>
+          ${hasPendingImage ? `<p style="font-size:11.5px;color:var(--ts);margin:4px 0 0">Nueva imagen lista: ${esc(pendingPolicyImage.name)}</p>` : ''}
         </div>
       </div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <button type="button" class="btn btn-sm btn-primary" id="pf-policy-save-btn">Guardar póliza</button>
+        <button type="button" class="btn btn-sm btn-primary" id="pf-policy-save-btn">${editingPolicy ? 'Guardar cambios' : 'Guardar póliza'}</button>
         <button type="button" class="btn btn-sm" id="pf-policy-cancel-btn">Cancelar</button>
       </div>
     ` : `<button type="button" class="btn btn-sm" id="pf-policy-add-btn" style="margin-top:8px">+ Agregar póliza</button>`}
@@ -543,28 +595,74 @@ async function renderPoliciesSection(patientId) {
       const pol = policies.find(x => x.id === el.dataset.viewPolicy);
       if (pol?.imagen) openAttachmentViewer(pol.imagen);
     }));
+  container.querySelectorAll('[data-edit-policy]').forEach(el =>
+    el.addEventListener('click', () => {
+      const pol = policies.find(x => x.id === el.dataset.editPolicy);
+      if (!pol) return;
+      const known = [...POLICY_TYPES_FIJOS, ...customTypes.filter(c => !POLICY_TYPES_FIJOS.includes(c))];
+      editingPolicy = pol;
+      pendingPolicyTipo = known.includes(pol.tipo) ? pol.tipo : OTRA_VALUE;
+      pendingPolicyImage = null;
+      pendingPolicyImageRemoved = false;
+      policyFormOpen = true;
+      renderPoliciesSection(patientId);
+    }));
 
   if (policyFormOpen) {
     document.getElementById('pf-policy-tipo').addEventListener('change', (e) => {
-      pendingPolicyOtra = e.target.value === OTRA_VALUE;
+      pendingPolicyTipo = e.target.value;
       renderPoliciesSection(patientId);
     });
     document.getElementById('pf-policy-save-btn').addEventListener('click', () => savePolicyInline(patientId));
     document.getElementById('pf-policy-cancel-btn').addEventListener('click', () => {
       policyFormOpen = false;
-      pendingPolicyOtra = false;
+      editingPolicy = null;
+      pendingPolicyTipo = '';
       pendingPolicyImage = null;
+      pendingPolicyImageRemoved = false;
       renderPoliciesSection(patientId);
     });
-    // Subir archivo o tomar foto con la cámara — ambas rutas pasan por
-    // processUploadFile, que convierte cualquier foto a PDF automáticamente
-    // (cambio transversal P1.5) para no acumular carnets pesados.
+    document.getElementById('pf-policy-imagen-view-btn')?.addEventListener('click', () => {
+      if (editingPolicy?.imagen) openAttachmentViewer(editingPolicy.imagen);
+    });
+    document.getElementById('pf-policy-imagen-remove-btn')?.addEventListener('click', () => {
+      if (pendingPolicyImage) pendingPolicyImage = null;
+      else pendingPolicyImageRemoved = true;
+      renderPoliciesSection(patientId);
+    });
+    // Auditoría 2026-07-17: el carnet ya no se convierte a PDF — si es una
+    // imagen, pasa por el recortador (para poder encuadrarla) y se guarda
+    // como imagen; si es un PDF ya escaneado, se sube tal cual (mismo
+    // criterio que antes tenía processUploadFile para archivos que ya
+    // llegaban en PDF).
     const handlePolicyFileChange = async (e) => {
       const file = e.target.files[0];
-      if (!file) return;
-      const processed = await files.processUploadFile(file);
       e.target.value = '';
-      if (processed) pendingPolicyImage = processed;
+      if (!file) return;
+      if (file.type === 'application/pdf') {
+        if (file.size > files.MAX_FILE_MB * 1024 * 1024) {
+          showToast(`Archivo muy grande (máx. ${files.MAX_FILE_MB}MB)`, 'err');
+          return;
+        }
+        const dataUrl = await files.blobToDataUrl(file);
+        pendingPolicyImage = { name: file.name, type: file.type, data: dataUrl };
+        pendingPolicyImageRemoved = false;
+        renderPoliciesSection(patientId);
+        return;
+      }
+      if (!files.validateImageFile(file)) return;
+      const dataUrl = await files.blobToDataUrl(file);
+      const cropped = await openImageCropper(dataUrl, {
+        shape: 'rect',
+        aspect: POLICY_IMAGE_ASPECT,
+        outputWidth: 1000,
+        title: 'Ajustar carnet',
+      });
+      if (!cropped) return; // el usuario canceló el recorte
+      const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
+      pendingPolicyImage = { name, type: 'image/jpeg', data: cropped };
+      pendingPolicyImageRemoved = false;
+      renderPoliciesSection(patientId);
     };
     document.getElementById('pf-policy-imagen').addEventListener('change', handlePolicyFileChange);
     document.getElementById('pf-policy-imagen-cam').addEventListener('change', handlePolicyFileChange);
@@ -572,6 +670,10 @@ async function renderPoliciesSection(patientId) {
   } else {
     document.getElementById('pf-policy-add-btn').addEventListener('click', () => {
       policyFormOpen = true;
+      editingPolicy = null;
+      pendingPolicyTipo = '';
+      pendingPolicyImage = null;
+      pendingPolicyImageRemoved = false;
       renderPoliciesSection(patientId);
     });
   }
@@ -584,17 +686,29 @@ async function savePolicyInline(patientId) {
   }
   const numeroPoliza = document.getElementById('pf-policy-numero').value.trim();
   const aseguradora = document.getElementById('pf-policy-aseguradora').value.trim();
+  const wasEditing = !!editingPolicy;
+  const oldImagePath = editingPolicy?.imagen?.path;
   try {
     const tipo = await resolveCatalogValue(state.household.id, CATEGORIA_POLIZA, tipoSel, document.getElementById('pf-policy-tipo-otra').value);
-    let saved = await api.savePatientPolicy({ tipo, numeroPoliza, aseguradora }, state.household.id, patientId);
+    let imagen = editingPolicy?.imagen || null;
+    if (pendingPolicyImageRemoved) imagen = null;
+    const base = editingPolicy ? { id: editingPolicy.id, imagen } : { imagen };
+    let saved = await api.savePatientPolicy({ ...base, tipo, numeroPoliza, aseguradora }, state.household.id, patientId);
     if (pendingPolicyImage) {
       const uploaded = await files.uploadAttachment(state.household.id, saved.id, 'poliza', pendingPolicyImage);
       saved = await api.savePatientPolicy({ ...saved, imagen: uploaded }, state.household.id, patientId);
     }
+    // Si se reemplazó o se quitó la imagen anterior, se borra del bucket
+    // recién ahora que el guardado ya tuvo éxito.
+    if (oldImagePath && oldImagePath !== saved.imagen?.path) {
+      files.removeAttachments([oldImagePath]);
+    }
     policyFormOpen = false;
-    pendingPolicyOtra = false;
+    editingPolicy = null;
+    pendingPolicyTipo = '';
     pendingPolicyImage = null;
-    showToast('Póliza agregada');
+    pendingPolicyImageRemoved = false;
+    showToast(wasEditing ? 'Póliza actualizada' : 'Póliza agregada');
     renderPoliciesSection(patientId);
   } catch (err) {
     showToast(err.message || 'Error al guardar la póliza', 'err');
@@ -608,6 +722,15 @@ async function deletePolicyConfirm(id, patientId) {
     const pol = policies.find(x => x.id === id);
     await api.deletePatientPolicy(id);
     if (pol?.imagen?.path) files.removeAttachments([pol.imagen.path]);
+    // Si el formulario de edición estaba abierto justo para esta póliza, se
+    // cierra — ya no existe nada que guardar.
+    if (editingPolicy?.id === id) {
+      policyFormOpen = false;
+      editingPolicy = null;
+      pendingPolicyTipo = '';
+      pendingPolicyImage = null;
+      pendingPolicyImageRemoved = false;
+    }
     showToast('Póliza eliminada', 'warn');
     renderPoliciesSection(patientId);
   } catch (err) {
@@ -635,9 +758,14 @@ async function renderDiagnosesSection(patientId) {
           <div class="policy-tipo" style="font-family:'JetBrains Mono',monospace">${esc(d.codigoCie10)}</div>
           <div class="policy-num">${d.descripcion ? esc(d.descripcion) : 'Sin descripción'}</div>
         </div>
-        <button type="button" class="btn btn-sm btn-icon btn-danger" data-delete-diagnosis="${d.id}" title="Eliminar">
-          <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-        </button>
+        <div class="policy-actions">
+          <button type="button" class="btn btn-sm btn-icon" data-edit-diagnosis="${d.id}" title="Editar">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button type="button" class="btn btn-sm btn-icon btn-danger" data-delete-diagnosis="${d.id}" title="Eliminar">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
       </div>`).join('')}</div>` : '';
 
   container.innerHTML = `
@@ -651,16 +779,16 @@ async function renderDiagnosesSection(patientId) {
         <div class="form-row cols-2" style="margin-top:8px">
           <div class="form-field">
             <label class="fl">Código CIE10</label>
-            <input class="fi" id="pf-diag-codigo" type="text" placeholder="Ej: E11.9" style="font-family:'JetBrains Mono',monospace"/>
+            <input class="fi" id="pf-diag-codigo" type="text" placeholder="Ej: E11.9" style="font-family:'JetBrains Mono',monospace" value="${editingDiagnosis ? esc(editingDiagnosis.codigoCie10) : ''}"/>
           </div>
           <div class="form-field">
             <label class="fl">Descripción (opcional)</label>
-            <input class="fi" id="pf-diag-desc" type="text" placeholder="Ej: Diabetes tipo 2"/>
+            <input class="fi" id="pf-diag-desc" type="text" placeholder="Ej: Diabetes tipo 2" value="${editingDiagnosis ? esc(editingDiagnosis.descripcion || '') : ''}"/>
           </div>
         </div>
         <p style="font-size:11.5px;color:var(--tm);margin:6px 0 0">Búsqueda por nombre o código: pendiente (requiere definir la fuente de datos CIE10). Por ahora se ingresa el código manualmente.</p>
         <div style="display:flex;gap:8px;margin-top:8px">
-          <button type="button" class="btn btn-sm btn-primary" id="pf-diag-save-btn">Agregar diagnóstico</button>
+          <button type="button" class="btn btn-sm btn-primary" id="pf-diag-save-btn">${editingDiagnosis ? 'Guardar cambios' : 'Agregar diagnóstico'}</button>
           <button type="button" class="btn btn-sm" id="pf-diag-cancel-btn">Cancelar</button>
         </div>
       ` : `<button type="button" class="btn btn-sm" id="pf-diag-add-btn" style="margin-top:8px">+ Agregar diagnóstico</button>`}
@@ -669,10 +797,18 @@ async function renderDiagnosesSection(patientId) {
 
   container.querySelectorAll('[data-delete-diagnosis]').forEach(el =>
     el.addEventListener('click', () => deleteDiagnosisConfirm(el.dataset.deleteDiagnosis, patientId)));
+  container.querySelectorAll('[data-edit-diagnosis]').forEach(el =>
+    el.addEventListener('click', () => {
+      const d = diagnoses.find(x => x.id === el.dataset.editDiagnosis);
+      if (!d) return;
+      editingDiagnosis = d;
+      cronicoAddOpen = true;
+      renderDiagnosesSection(patientId);
+    }));
 
   document.getElementById('pf-cronicos-check').addEventListener('change', (e) => {
     cronicoSectionOpen = e.target.checked;
-    if (!cronicoSectionOpen) cronicoAddOpen = false;
+    if (!cronicoSectionOpen) { cronicoAddOpen = false; editingDiagnosis = null; }
     renderDiagnosesSection(patientId);
   });
 
@@ -681,11 +817,13 @@ async function renderDiagnosesSection(patientId) {
       document.getElementById('pf-diag-save-btn').addEventListener('click', () => saveDiagnosisInline(patientId));
       document.getElementById('pf-diag-cancel-btn').addEventListener('click', () => {
         cronicoAddOpen = false;
+        editingDiagnosis = null;
         renderDiagnosesSection(patientId);
       });
     } else {
       document.getElementById('pf-diag-add-btn').addEventListener('click', () => {
         cronicoAddOpen = true;
+        editingDiagnosis = null;
         renderDiagnosesSection(patientId);
       });
     }
@@ -698,10 +836,16 @@ async function saveDiagnosisInline(patientId) {
     showToast('Escribe el código CIE10', 'err'); return;
   }
   const descripcion = document.getElementById('pf-diag-desc').value.trim();
+  const wasEditing = !!editingDiagnosis;
   try {
-    await api.addPatientDiagnosis({ codigoCie10, descripcion }, state.household.id, patientId);
+    if (editingDiagnosis) {
+      await api.updatePatientDiagnosis(editingDiagnosis.id, { codigoCie10, descripcion });
+    } else {
+      await api.addPatientDiagnosis({ codigoCie10, descripcion }, state.household.id, patientId);
+    }
     cronicoAddOpen = false;
-    showToast('Diagnóstico agregado');
+    editingDiagnosis = null;
+    showToast(wasEditing ? 'Diagnóstico actualizado' : 'Diagnóstico agregado');
     renderDiagnosesSection(patientId);
   } catch (err) {
     showToast(err.message || 'Error al guardar el diagnóstico', 'err');
@@ -712,6 +856,7 @@ async function deleteDiagnosisConfirm(id, patientId) {
   if (!confirm('¿Eliminar este diagnóstico?')) return;
   try {
     await api.deletePatientDiagnosis(id);
+    if (editingDiagnosis?.id === id) { cronicoAddOpen = false; editingDiagnosis = null; }
     showToast('Diagnóstico eliminado', 'warn');
     renderDiagnosesSection(patientId);
   } catch (err) {
