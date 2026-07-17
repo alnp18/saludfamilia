@@ -1,9 +1,10 @@
 # SaludFamilia — Contexto del proyecto
 
 _Última actualización: 2026-07-17 (P1.5 completa + P2 100% completa +
-backlog "MI AUDITORIA" de Ficha de paciente y Órdenes médicas + segunda
-auditoría rápida del usuario sobre la Ficha de paciente: recorte de
-imagen, editar pólizas/diagnósticos, fix del selector de tipo de póliza)_
+backlog "MI AUDITORIA" + segunda auditoría de Ficha de paciente: recorte
+de imagen, editar pólizas/diagnósticos, fix del selector de tipo + tercera
+auditoría de Medicamentos: indicación, controlado, usos a demanda,
+agrupación jerárquica y unificación Órdenes→Medicamento)_
 
 ## Qué es
 
@@ -79,7 +80,9 @@ saludfamilia/
 │       ├── 0012_avatar_paciente.sql          ← MI AUDITORIA Pacientes #1
 │       ├── 0013_poliza_aseguradora.sql       ← MI AUDITORIA Pacientes #3
 │       ├── 0014_diagnosticos_cronicos.sql    ← MI AUDITORIA Pacientes #5
-│       └── 0015_autorizaciones_medicamentos.sql ← MI AUDITORIA Órdenes #4
+│       ├── 0015_autorizaciones_medicamentos.sql ← MI AUDITORIA Órdenes #4
+│       ├── 0016_patient_diagnoses_update_rls.sql ← 2ª auditoría (editar diagnósticos)
+│       └── 0017_medicamentos_indicacion_controlado_usos.sql ← auditoría Medicamentos
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
@@ -119,10 +122,12 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, **16 migraciones** aplicadas (`0012`–`0015` del backlog
+  `ACTIVE_HEALTHY`, **17 migraciones** aplicadas (`0012`–`0015` del backlog
   MI AUDITORIA: avatar de paciente, aseguradora de pólizas, diagnósticos
   crónicos CIE10, y autorizaciones mes a mes de Órdenes; `0016` de la
-  segunda auditoría: política RLS de UPDATE en `patient_diagnoses`).
+  segunda auditoría: política RLS de UPDATE en `patient_diagnoses`; `0017`
+  de la auditoría de Medicamentos: columnas `indicacion`/`controlado` en
+  `medications` y tabla nueva `med_usage_events` con RLS).
   Plan gratuito — "Leaked password protection" NO se puede activar
   (requiere Pro); el mínimo de contraseña se subió a 8 caracteres en Auth
   (2026-07-16). PostgreSQL 17. Bucket privado de Storage `adjuntos` (10MB
@@ -659,6 +664,52 @@ rollback. El bundle con este commit (más los 3 pendientes de antes:
 `b61a305`, `a515d18`, `01278e9`) se entregó al usuario para fusionar y
 subir a `origin/main`.
 
+## Tercera auditoría — Medicamentos (completada 2026-07-17)
+
+Backlog que el usuario relevó sobre el área de Medicamentos tras usar la
+app. Cinco frentes, todos completados en la misma sesión, commit `1dd9c8e`
++ migración `0017`:
+
+- **Indicación** (columna `medications.indicacion`): campo de texto libre
+  con la enfermedad o síntoma que trata el medicamento. Decisión explícita
+  del usuario: texto libre, **no** enlazado al catálogo CIE10 de
+  diagnósticos crónicos. Se muestra en la tarjeta ("Para: …").
+- **Medicamento controlado** (columna `medications.controlado`, boolean):
+  checkbox en el formulario. Los controlados se destacan con badge y
+  acento rojo, y forman el primer grupo de la lista.
+- **Usos de medicamentos "a demanda"** (tabla nueva `med_usage_events`,
+  migración `0017`, RLS verificada con rollback antes de aplicar — misma
+  metodología que las auditorías anteriores): cuando un medicamento tiene
+  frecuencia "A demanda", aparece un botón **USADO** tanto en su tarjeta
+  como en un widget nuevo del dashboard ("Medicamentos a demanda"). Al
+  presionarlo se pide la razón del uso (obligatoria, con ejemplos tipo
+  "subida de tensión 145/95, crisis convulsiva…") y se guarda un apunte
+  con fecha y hora. La tarjeta muestra el conteo de usos y el último; los
+  apuntes se pueden revisar y eliminar desde el modal. La tabla es
+  append-only (sin política de UPDATE — corregir = eliminar y re-registrar).
+- **Agrupación jerárquica de activos**: la lista de activos se divide en
+  tres grupos en este orden — **Medicamentos controlados** → **Por
+  horario** → **A demanda** — y dentro de cada grupo se ordena
+  alfabéticamente. Un controlado va al grupo de controlados aunque sea
+  también "a demanda" (igual conserva su botón USADO). Al final, un grupo
+  **colapsable de inactivos** ("Inactivos / con seguimiento previo"). Por
+  decisión del usuario se **conserva además** la sección de "Historial de
+  versiones" existente (que agrupa por nombre y versión).
+- **Unificación Órdenes → Medicamento**: al guardar una orden de tipo
+  "Medicamentos/Insumos/Terapias" en la que se marcó como "entregado" un
+  mes que antes no lo estaba (transición false→true en esa edición), se
+  ofrece crear un nuevo medicamento. Si se acepta, se abre el formulario de
+  medicamento precargado con el nombre = descripción de la orden, para el
+  paciente de la orden. La detección compara contra un snapshot del estado
+  "entregado" capturado al abrir el asistente (`authOriginalEntregado`).
+
+**Verificación**: `npm run build` limpio y capturas de Playwright de la
+agrupación completa (los tres grupos + inactivos colapsable), del widget
+del dashboard y del modal de registro de uso, en el CSS real. La única
+escritura contra producción fue la migración `0017` (aditiva), verificada
+primero en transacción con rollback (miembro puede insertar/ver un uso,
+usuario de otro household recibe "row violates row-level security policy").
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -705,7 +756,14 @@ subir a `origin/main`.
     editables (no solo agregar/eliminar), el carnet ya no se convierte a
     PDF, y fix del selector de tipo de póliza que se atascaba en SOAT.
     Ver sección dedicada arriba.
-14. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
+14. **Tercera auditoría — Medicamentos: COMPLETADA** el 2026-07-17
+    (commit `1dd9c8e` + migración `0017`): indicación (texto libre),
+    medicamento controlado, registro de usos "a demanda" con botón USADO
+    (tarjeta + dashboard) y razón obligatoria, agrupación jerárquica de
+    activos (controlados/horario/demanda) con grupo colapsable de
+    inactivos, y unificación Órdenes→Medicamento al marcar entregado. Ver
+    sección dedicada arriba.
+15. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
     directorio público auditado de médicos y centros.
 
 ## Criterio de asignación de agentes de Claude

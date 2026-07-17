@@ -28,9 +28,21 @@ const FREQ_OPTIONS = Object.keys(FREQ_CONFIG);
 let medHorariosArr = []; // [{hora, dosis}]
 let pendingViaOtra = false;
 let showHistory = false;
+let showInactive = false;            // grupo colapsable de inactivos (auditoría 2026-07-17)
+let usageByMed = {};                 // { medId: { count, last, events[] } } — usos "a demanda"
 let pendingOptions = null;
 
 export function setPendingOptions(opts) { pendingOptions = opts; }
+
+const DEMANDA = 'A demanda';
+
+/** Fecha + hora corta para los apuntes de uso (timestamptz → local). */
+function fmtDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })
+    + ' ' + d.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+}
 
 export async function render() {
   const container = document.getElementById('view-meds');
@@ -47,10 +59,7 @@ export async function render() {
         <button class="btn btn-primary" id="btn-new-med"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nuevo medicamento</button>
       </div>
     </div>
-    <div id="meds-active-section">
-      <div class="meds-section-label">Medicamentos activos <span class="meds-count" id="meds-active-count">0</span></div>
-      <div class="meds-grid" id="meds-active-grid"></div>
-    </div>
+    <div id="meds-active-section"></div>
     <div id="meds-history-section" style="display:none;margin-top:24px">
       <div class="meds-section-label" style="color:var(--ts)">Historial de versiones <span class="meds-count" id="meds-hist-count" style="background:var(--surface)">0</span></div>
       <div id="meds-history-list"></div>
@@ -59,8 +68,10 @@ export async function render() {
   document.getElementById('btn-new-med').addEventListener('click', () => openMedModal());
   document.getElementById('btn-show-history').addEventListener('click', toggleMedsHistory);
 
+  const section = document.getElementById('meds-active-section');
+
   if (!state.activePatient) {
-    document.getElementById('meds-active-section').innerHTML = emptyStateHtml({
+    section.innerHTML = emptyStateHtml({
       icon: Icons.users,
       title: 'Selecciona un paciente',
       action: { id: 'meds-goto-patients', label: 'Ir a Pacientes' },
@@ -70,41 +81,103 @@ export async function render() {
   }
   document.getElementById('meds-sub').textContent = 'Medicamentos de ' + state.activePatient.nombre;
 
-  const grid = document.getElementById('meds-active-grid');
-  let all;
+  let all, usos;
   try {
-    all = await api.listMedsByPatient(state.activePatient.id);
+    [all, usos] = await Promise.all([
+      api.listMedsByPatient(state.activePatient.id),
+      api.listMedUsageByPatient(state.activePatient.id),
+    ]);
   } catch (err) {
     showToast(err.message || 'No se pudieron cargar los medicamentos', 'err');
-    grid.innerHTML = errorStateHtml({ retryId: 'btn-retry-meds', style: 'grid-column:1/-1' });
+    section.innerHTML = errorStateHtml({ retryId: 'btn-retry-meds', style: 'grid-column:1/-1' });
     document.getElementById('btn-retry-meds').addEventListener('click', () => render());
     return;
   }
+
+  usageByMed = buildUsageIndex(usos);
   const active = all.filter(m => m.activo);
   const inactive = all.filter(m => !m.activo);
 
-  document.getElementById('meds-active-count').textContent = active.length;
   document.getElementById('btn-show-history').style.display = inactive.length ? 'flex' : 'none';
 
-  if (!active.length) {
-    grid.innerHTML = emptyStateHtml({
+  if (!active.length && !inactive.length) {
+    section.innerHTML = emptyStateHtml({
       icon: Icons.pill,
-      title: 'Sin medicamentos activos',
+      title: 'Sin medicamentos registrados',
       message: `Registra el primer medicamento de ${esc(state.activePatient.nombre)}.`,
       action: { id: 'btn-new-med-empty', label: 'Agregar medicamento' },
       style: 'grid-column:1/-1',
     });
     document.getElementById('btn-new-med-empty').addEventListener('click', () => openMedModal());
   } else {
-    grid.innerHTML = active.map(renderMedCard).join('');
-    grid.querySelectorAll('[data-edit-med]').forEach(b => b.addEventListener('click', () => openMedModal(b.dataset.editMed)));
-    grid.querySelectorAll('[data-suspend-med]').forEach(b => b.addEventListener('click', () => suspendMedConfirm(b.dataset.suspendMed)));
-    grid.querySelectorAll('[data-delete-med]').forEach(b => b.addEventListener('click', () => deleteMedConfirm(b.dataset.deleteMed)));
+    section.innerHTML = renderGroupedActive(active) + renderInactiveGroup(inactive);
+    wireMedCardActions(section);
+    const toggle = document.getElementById('meds-inactive-toggle');
+    toggle?.addEventListener('click', () => {
+      showInactive = !showInactive;
+      document.getElementById('meds-inactive-body').style.display = showInactive ? 'grid' : 'none';
+      toggle.classList.toggle('open', showInactive);
+    });
   }
 
   if (showHistory) await renderMedsHistory();
 
   if (pendingOptions?.openModal) { pendingOptions = null; openMedModal(); }
+}
+
+/** Agrupa los usos "a demanda" por medicamento. `usos` viene ordenado del
+ * más reciente al más antiguo, así que el primero de cada grupo es el último uso. */
+function buildUsageIndex(usos) {
+  const idx = {};
+  usos.forEach(u => {
+    const g = (idx[u.medicationId] ||= { count: 0, last: null, events: [] });
+    g.count++;
+    g.events.push(u);
+    if (!g.last) g.last = u.usadoEn;
+  });
+  return idx;
+}
+
+// Jerarquía de la lista de activos (auditoría 2026-07-17): controlados
+// primero, luego los de horario fijo, luego los "a demanda". Un controlado
+// va al grupo de controlados aunque sea también "a demanda" (igual conserva
+// su botón USADO en la tarjeta). Dentro de cada grupo, orden alfabético.
+const ACTIVE_GROUPS = [
+  { key: 'controlado', label: 'Medicamentos controlados', cls: 'g-red', test: m => m.controlado },
+  { key: 'horario', label: 'Por horario', cls: 'g-primary', test: m => !m.controlado && m.frecuencia !== DEMANDA },
+  { key: 'demanda', label: 'A demanda', cls: 'g-purple', test: m => !m.controlado && m.frecuencia === DEMANDA },
+];
+
+function byNombre(a, b) { return a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }); }
+
+function renderGroupedActive(active) {
+  return ACTIVE_GROUPS.map(g => {
+    const items = active.filter(g.test).sort(byNombre);
+    if (!items.length) return '';
+    return `<div class="meds-group">
+      <div class="meds-section-label ${g.cls}">${esc(g.label)} <span class="meds-count">${items.length}</span></div>
+      <div class="meds-grid">${items.map(renderMedCard).join('')}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderInactiveGroup(inactive) {
+  if (!inactive.length) return '';
+  const items = inactive.slice().sort(byNombre);
+  return `<div class="meds-group meds-inactive-group">
+    <button type="button" class="meds-inactive-toggle ${showInactive ? 'open' : ''}" id="meds-inactive-toggle">
+      <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+      Inactivos / con seguimiento previo <span class="meds-count" style="background:var(--surface)">${items.length}</span>
+    </button>
+    <div class="meds-grid" id="meds-inactive-body" style="display:${showInactive ? 'grid' : 'none'}">${items.map(renderMedCard).join('')}</div>
+  </div>`;
+}
+
+function wireMedCardActions(root) {
+  root.querySelectorAll('[data-edit-med]').forEach(b => b.addEventListener('click', () => openMedModal(b.dataset.editMed)));
+  root.querySelectorAll('[data-suspend-med]').forEach(b => b.addEventListener('click', () => suspendMedConfirm(b.dataset.suspendMed)));
+  root.querySelectorAll('[data-delete-med]').forEach(b => b.addEventListener('click', () => deleteMedConfirm(b.dataset.deleteMed)));
+  root.querySelectorAll('[data-uso-med]').forEach(b => b.addEventListener('click', () => openMedUsoModal(b.dataset.usoMed, render)));
 }
 
 function renderMedCard(m) {
@@ -118,11 +191,25 @@ function renderMedCard(m) {
     `<span class="horario-chip">${esc(h.hora)}${h.dosis ? ' · ' + esc(h.dosis) : ''}</span>`
   ).join('');
 
-  return `<div class="med-card ${m.activo ? '' : 'inactive'}">
+  // Bloque de uso "a demanda": contador + último uso + botón USADO. Solo en
+  // medicamentos activos con frecuencia "A demanda" (auditoría 2026-07-17).
+  const esDemanda = m.frecuencia === DEMANDA;
+  const uso = usageByMed[m.id];
+  const usoN = uso?.count || 0;
+  const usoBlock = (esDemanda && m.activo) ? `
+    <div class="med-uso-block">
+      <div class="med-uso-info">
+        <span class="med-uso-count">${usoN}</span>
+        <span class="med-uso-label">uso${usoN === 1 ? '' : 's'} registrado${usoN === 1 ? '' : 's'}${uso?.last ? ' · último ' + esc(fmtDateTime(uso.last)) : ''}</span>
+      </div>
+      <button class="btn btn-sm btn-uso" data-uso-med="${m.id}" title="Registrar un uso">USADO</button>
+    </div>` : '';
+
+  return `<div class="med-card ${m.activo ? '' : 'inactive'}${m.controlado ? ' controlado' : ''}">
     <div class="med-card-top">
       <div class="med-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 6.5L6.5 10.5a5 5 0 007.07 7.07l4-4a5 5 0 00-7.07-7.07z"/></svg></div>
       <div style="flex:1;min-width:0">
-        <div class="med-name">${esc(m.nombre)}</div>
+        <div class="med-name">${esc(m.nombre)}${m.controlado ? '<span class="med-badge-controlado" title="Medicamento controlado">Controlado</span>' : ''}</div>
         <div class="med-via">${esc(m.via || '')}${m.version > 1 ? ' · v' + m.version : ''}</div>
       </div>
       <div class="med-card-actions">
@@ -136,7 +223,9 @@ function renderMedCard(m) {
         <div class="med-dosis-num">${esc(m.dosis || '—')}</div>
         <div><div class="med-dosis-unit">${esc(m.unidad || '')}</div><div class="med-dosis-freq">${esc(m.frecuencia || '')}</div></div>
       </div>
+      ${m.indicacion ? `<div class="med-indicacion"><span class="med-indicacion-label">Para</span> ${esc(m.indicacion)}</div>` : ''}
       ${horarios ? `<div><div class="fl" style="margin-bottom:5px">Horarios</div><div class="horarios-row">${horarios}</div></div>` : ''}
+      ${usoBlock}
       <div class="med-dates">
         <span>Inicio: <strong>${fmtDate(m.fechaInicio)}</strong></span>
         ${m.fechaFin ? `<span>Fin: <strong>${fmtDate(m.fechaFin)}</strong></span>` : ''}
@@ -285,7 +374,7 @@ function renderHorariosBuilder(freq) {
   });
 }
 
-async function openMedModal(id) {
+export async function openMedModal(id, prefill = null) {
   let m = null, customVia;
   try {
     if (id) m = await api.getMed(id);
@@ -309,7 +398,11 @@ async function openMedModal(id) {
     `<div class="form-body">
       ${willVersion ? `<div class="info-box" style="margin-bottom:4px">Si cambias dosis, unidad, frecuencia, vía u horarios se creará automáticamente una nueva versión. El registro anterior queda en el historial.</div>` : ''}
       <div class="form-row cols-2">
-        <div class="form-field span2"><label class="fl">Nombre del medicamento *</label><input class="fi" id="mf-nombre" type="text" placeholder="Ej: Metformina, Enalapril, Aspirina…" value="${esc(m?.nombre || '')}"/></div>
+        <div class="form-field span2"><label class="fl">Nombre del medicamento *</label><input class="fi" id="mf-nombre" type="text" placeholder="Ej: Metformina, Enalapril, Aspirina…" value="${esc(m?.nombre || prefill?.nombre || '')}"/></div>
+        <div class="form-field span2">
+          <label class="ck-row"><input type="checkbox" id="mf-controlado" ${m?.controlado ? 'checked' : ''}/> <span>Medicamento controlado</span></label>
+        </div>
+        <div class="form-field span2"><label class="fl">Indicación — enfermedad o síntoma que trata</label><input class="fi" id="mf-indicacion" type="text" placeholder="Ej: Hipertensión, diabetes tipo 2, dolor lumbar…" value="${esc(m?.indicacion || '')}"/></div>
         <div class="form-field"><label class="fl">Dosis diaria *</label><input class="fi" id="mf-dosis" type="text" placeholder="Ej: 500, 10, 0.25" value="${esc(m?.dosis || '')}"/></div>
         <div class="form-field"><label class="fl">Unidad</label><select class="fi" id="mf-unidad">${UNIDAD_OPTIONS.map(u => `<option ${m?.unidad === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Frecuencia</label><select class="fi" id="mf-freq"><option value="">Seleccionar…</option>${FREQ_OPTIONS.map(f => `<option ${m?.frecuencia === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
@@ -360,6 +453,8 @@ async function saveMedForm(editId) {
     frecuencia: document.getElementById('mf-freq').value,
     horarios: medHorariosArr.filter(h => h.hora),
     via,
+    indicacion: document.getElementById('mf-indicacion').value.trim(),
+    controlado: document.getElementById('mf-controlado').checked,
     fechaInicio: document.getElementById('mf-inicio').value,
     fechaFin: document.getElementById('mf-fin').value,
     observaciones: document.getElementById('mf-obs').value.trim(),
@@ -421,4 +516,90 @@ async function deleteMedConfirm(id) {
   } catch (err) {
     showToast(err.message || 'Error al eliminar el medicamento', 'err');
   }
+}
+
+// ─────────────────────────────────────────
+// Registro de uso "a demanda" (auditoría 2026-07-17)
+// Se invoca desde la tarjeta del medicamento y desde el widget del
+// dashboard. `onDone` refresca la vista de origen tras registrar/eliminar
+// un uso. Exportado para que el dashboard lo reutilice.
+// ─────────────────────────────────────────
+export async function openMedUsoModal(medId, onDone) {
+  if (!state.activePatient) return;
+  let m, eventos;
+  try {
+    m = await api.getMed(medId);
+    eventos = (await api.listMedUsageByPatient(state.activePatient.id)).filter(e => e.medicationId === medId);
+  } catch (err) {
+    showToast(err.message || 'No se pudo abrir el registro de uso', 'err');
+    return;
+  }
+  renderUsoModal(m, eventos, onDone);
+}
+
+function renderUsoModal(m, eventos, onDone) {
+  const listaHtml = eventos.length ? `
+    <div class="uso-list">
+      <div class="fl" style="margin-bottom:6px">Usos registrados (${eventos.length})</div>
+      ${eventos.map(e => `<div class="uso-item">
+        <div style="flex:1;min-width:0">
+          <div class="uso-item-date">${esc(fmtDateTime(e.usadoEn))}</div>
+          <div class="uso-item-razon">${esc(e.razon)}</div>
+        </div>
+        <button class="btn btn-sm btn-icon btn-danger" data-del-uso="${e.id}" title="Eliminar apunte"><svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6"/></svg></button>
+      </div>`).join('')}
+    </div>` : '<p style="font-size:12.5px;color:var(--ts);margin:2px 0 0">Aún no hay usos registrados para este medicamento.</p>';
+
+  showModal(
+    'Registrar uso — ' + m.nombre,
+    `<div class="form-body">
+      <div class="form-field">
+        <label class="fl">¿Por qué se usó ahora? *</label>
+        <textarea class="fi" id="uso-razon" rows="3" placeholder="Ej: Subida de tensión 145/95, crisis convulsiva de más de 3 min, dolor agudo en el pecho, glucosa alta 240…"></textarea>
+        <p style="font-size:11px;color:var(--tm);margin:5px 0 0">Se guarda con la fecha y hora actuales.</p>
+      </div>
+      ${listaHtml}
+    </div>`,
+    [
+      { label: 'Cerrar', cls: 'btn', action: () => { closeModal(); onDone?.(); } },
+      { label: 'Registrar uso', cls: 'btn btn-primary', action: () => saveUso(m.id, onDone) },
+    ]
+  );
+  document.querySelectorAll('[data-del-uso]').forEach(b =>
+    b.addEventListener('click', () => deleteUso(b.dataset.delUso, m.id, onDone)));
+  setTimeout(() => document.getElementById('uso-razon')?.focus(), 50);
+}
+
+async function saveUso(medId, onDone) {
+  const razon = document.getElementById('uso-razon').value.trim();
+  if (!razon) { showToast('Escribe brevemente la razón del uso', 'err'); return; }
+  try {
+    await api.addMedUsageEvent({ medicationId: medId, razon }, state.household.id, state.activePatient.id);
+    showToast('Uso registrado');
+    onDone?.();
+    await refreshUsoModal(medId, onDone);
+  } catch (err) {
+    showToast(err.message || 'Error al registrar el uso', 'err');
+  }
+}
+
+async function deleteUso(usoId, medId, onDone) {
+  if (!confirm('¿Eliminar este apunte de uso?')) return;
+  try {
+    await api.deleteMedUsageEvent(usoId);
+    showToast('Apunte eliminado', 'warn');
+    onDone?.();
+    await refreshUsoModal(medId, onDone);
+  } catch (err) {
+    showToast(err.message || 'Error al eliminar el apunte', 'err');
+  }
+}
+
+/** Re-pinta el modal con los apuntes actualizados sin cerrarlo. */
+async function refreshUsoModal(medId, onDone) {
+  try {
+    const m = await api.getMed(medId);
+    const eventos = (await api.listMedUsageByPatient(state.activePatient.id)).filter(e => e.medicationId === medId);
+    renderUsoModal(m, eventos, onDone);
+  } catch { /* si falla el refresco, el modal anterior queda visible */ }
 }

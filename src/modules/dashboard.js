@@ -6,6 +6,7 @@ import { hydrateAvatar } from '../lib/avatar.js';
 import { showToast } from '../lib/modal.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
+import { openMedUsoModal } from './meds.js';
 
 let calYear, calMonth;
 let clockTimer = null;
@@ -97,13 +98,14 @@ export async function render() {
   }
 
   const patient = state.activePatient;
-  let orders, meds, doctors, centers;
+  let orders, meds, doctors, centers, medUsos;
   try {
-    [orders, meds, doctors, centers] = await Promise.all([
+    [orders, meds, doctors, centers, medUsos] = await Promise.all([
       api.listOrdersByPatient(patient.id),
       api.listMedsByPatient(patient.id),
       api.listDoctors(state.household.id),
       api.listCenters(state.household.id),
+      api.listMedUsageByPatient(patient.id),
     ]);
   } catch (err) {
     showToast(err.message || 'No se pudo cargar el dashboard', 'err');
@@ -126,6 +128,21 @@ export async function render() {
   const withCita = orders.filter(o => o.cita_fecha && daysFrom(o.cita_fecha) >= 0 && daysFrom(o.cita_fecha) <= 30).length;
   const authExp = orders.filter(o => o.auth_fechaVence && daysFrom(o.auth_fechaVence) !== null && daysFrom(o.auth_fechaVence) >= 0 && daysFrom(o.auth_fechaVence) <= 15).length;
   const activeMed = meds.filter(m => m.activo).length;
+
+  // ── MEDICAMENTOS A DEMANDA (auditoría 2026-07-17) ──
+  const demandaMeds = meds.filter(m => m.activo && m.frecuencia === 'A demanda')
+    .sort((a, b) => a.nombre.localeCompare(b.nombre, 'es', { sensitivity: 'base' }));
+  const usoCount = {};
+  medUsos.forEach(u => { usoCount[u.medicationId] = (usoCount[u.medicationId] || 0) + 1; });
+  const demandaCard = demandaMeds.length ? `<div class="card">
+      <div class="card-hd"><div class="card-icon" style="background:var(--purple-dim);color:var(--purple-lt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 6.5L6.5 10.5a5 5 0 007.07 7.07l4-4a5 5 0 00-7.07-7.07z"/><line x1="14" y1="10" x2="10" y2="14"/></svg></div><h2>Medicamentos a demanda</h2></div>
+      <div style="padding:10px 14px;display:flex;flex-direction:column;gap:7px">
+        ${demandaMeds.map(m => `<div class="dmd-item">
+          <div class="dmd-info"><div class="dmd-name">${esc(m.nombre)}${m.controlado ? '<span class="med-badge-controlado">Controlado</span>' : ''}</div><div class="dmd-sub">${usoCount[m.id] || 0} uso${(usoCount[m.id] || 0) === 1 ? '' : 's'}${m.dosis ? ' · ' + esc(m.dosis) + ' ' + esc(m.unidad || '') : ''}</div></div>
+          <button class="btn btn-sm btn-uso" data-uso-med="${m.id}" title="Registrar un uso">USADO</button>
+        </div>`).join('')}
+      </div>
+    </div>` : '';
 
   // ── ALERTS ──
   const alerts = [];
@@ -248,6 +265,7 @@ export async function render() {
           </div>
           <div style="padding:10px 14px 14px" id="mini-cal"></div>
         </div>
+        ${demandaCard}
         <div class="card">
           <div class="card-hd"><div class="card-icon" style="background:var(--purple-dim);color:var(--purple-lt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h2>Acciones rápidas</h2></div>
           <div style="padding:10px 14px">
@@ -285,4 +303,6 @@ export async function render() {
   document.getElementById('dash-edit-patient')?.addEventListener('click', () => goViewCb?.('patients'));
   document.getElementById('cal-prev')?.addEventListener('click', () => calNav(-1));
   document.getElementById('cal-next')?.addEventListener('click', () => calNav(1));
+  container.querySelectorAll('[data-uso-med]').forEach(b =>
+    b.addEventListener('click', () => openMedUsoModal(b.dataset.usoMed, render)));
 }

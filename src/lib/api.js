@@ -493,6 +493,9 @@ function rowToMed(r) {
     via: r.via, fechaInicio: r.fecha_inicio, fechaFin: r.fecha_fin,
     observaciones: r.observaciones, activo: r.activo, version: r.version,
     medicamentoPadreId: r.medicamento_padre_id, motivoCambio: r.motivo_cambio,
+    // Auditoría de medicamentos (2026-07-17): indicación (enfermedad/síntoma,
+    // texto libre) y marca de medicamento controlado.
+    indicacion: r.indicacion, controlado: !!r.controlado,
   };
 }
 function medToRow(m, householdId, patientId) {
@@ -505,6 +508,7 @@ function medToRow(m, householdId, patientId) {
     observaciones: m.observaciones || null, activo: m.activo !== false,
     version: m.version || 1, medicamento_padre_id: m.medicamentoPadreId || null,
     motivo_cambio: m.motivoCambio || null,
+    indicacion: m.indicacion || null, controlado: m.controlado === true,
   };
 }
 
@@ -533,6 +537,41 @@ export async function updateMed(id, patch, householdId, patientId) {
 }
 export async function deleteMed(id) {
   const { error } = await supabase.from('medications').delete().eq('id', id);
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────
+// MED USAGE EVENTS (usos de medicamentos "a demanda" — auditoría 2026-07-17)
+// Append-only: se listan, se agregan y se pueden eliminar (para corregir un
+// apunte), no se editan. Ver migración 0017.
+// ─────────────────────────────────────────
+function rowToMedUsage(r) {
+  return {
+    id: r.id, medicationId: r.medication_id, patientId: r.patient_id,
+    usadoEn: r.usado_en, razon: r.razon,
+  };
+}
+
+/** Todos los usos registrados de los medicamentos de un paciente, del más
+ * reciente al más antiguo. El llamador los agrupa por medicationId. */
+export async function listMedUsageByPatient(patientId) {
+  const { data, error } = await supabase.from('med_usage_events').select('*')
+    .eq('patient_id', patientId).order('usado_en', { ascending: false });
+  if (error) throw error;
+  return data.map(rowToMedUsage);
+}
+
+export async function addMedUsageEvent({ medicationId, razon }, householdId, patientId) {
+  const { data, error } = await supabase.from('med_usage_events').insert({
+    household_id: householdId, patient_id: patientId,
+    medication_id: medicationId, razon,
+  }).select().single();
+  if (error) throw error;
+  return rowToMedUsage(data);
+}
+
+export async function deleteMedUsageEvent(id) {
+  const { error } = await supabase.from('med_usage_events').delete().eq('id', id);
   if (error) throw error;
 }
 

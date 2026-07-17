@@ -47,6 +47,10 @@ let currentOrderStageIdx = -1;
 // fechaInicio, fechaVencimiento, cantidad, entregado }]. Se guardan todas
 // juntas al enviar el formulario (ver replaceOrderAuthorizations).
 let authRows = [];
+// Meses que YA estaban marcados como "entregado" al abrir el asistente.
+// Sirve para detectar, al guardar, si en ESTA edición se marcó una nueva
+// entrega — y ahí ofrecer crear un medicamento (auditoría 2026-07-17).
+let authOriginalEntregado = new Set();
 
 export function setPendingOptions(opts) { pendingOptions = opts; }
 
@@ -588,6 +592,7 @@ async function openOrderWizard(id, prefill, forceTab) {
   originalStoredPaths = [];
   currentOrderStageIdx = -1;
   authRows = [];
+  authOriginalEntregado = new Set();
 
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
@@ -602,7 +607,10 @@ async function openOrderWizard(id, prefill, forceTab) {
       if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
       originalStoredPaths = files.attachmentPathsOfOrder(o);
       currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
-      if (isAuthTableType(o.tipoOrden)) authRows = await api.listOrderAuthorizations(id);
+      if (isAuthTableType(o.tipoOrden)) {
+        authRows = await api.listOrderAuthorizations(id);
+        authOriginalEntregado = new Set(authRows.filter(r => r.entregado).map(r => r.mesNumero));
+      }
     }
   } catch (err) {
     showToast(err.message || 'No se pudo abrir el asistente de la orden', 'err');
@@ -733,6 +741,7 @@ async function openOrderWizard(id, prefill, forceTab) {
     document.getElementById('wiz-tab-c-label').textContent = isAuthTableType(newTipo) ? 'C · Autorizaciones' : 'C · Autorización';
     if (isAuthTableType(newTipo) && document.getElementById('pane-d').classList.contains('visible')) switchWizTab('c');
     authRows = [];
+    authOriginalEntregado = new Set();
     renderPaneC(newTipo, null, centerOptions);
   });
 
@@ -926,6 +935,11 @@ async function saveOrderForm(editId) {
   };
   const wantsFollowUp = !authType && obj.estadoCita === 'Finalizado' && !!document.getElementById('of-followup')?.checked;
 
+  // Unificación Órdenes → Medicamento (auditoría 2026-07-17): si en esta
+  // edición se marcó como "entregado" algún mes que antes no lo estaba, se
+  // ofrece crear un nuevo medicamento a partir de la orden.
+  const nuevaEntrega = authType && authRows.some(r => r.entregado && !authOriginalEntregado.has(r.mesNumero));
+
   if (!obj.fechaOrden) { showToast('La fecha de la orden es obligatoria', 'err'); switchWizTab('a'); return; }
   if (!obj.tipoOrden) { showToast('Selecciona el tipo de orden', 'err'); switchWizTab('a'); return; }
 
@@ -972,6 +986,14 @@ async function saveOrderForm(editId) {
     }
     if (wantsFollowUp) {
       openOrderWizard(undefined, { medicoId: obj.medicoId, tipoOrden: 'Cita de control' });
+    } else if (nuevaEntrega) {
+      // Se marcó una nueva entrega en una orden de Medicamentos/Insumos/
+      // Terapias: ofrecer registrar el medicamento, precargando el nombre
+      // con la descripción de la orden.
+      if (confirm('Marcaste una entrega como entregada en esta orden.\n\n¿Quieres registrar un nuevo medicamento a partir de ella?')) {
+        const { openMedModal } = await import('./meds.js');
+        openMedModal(null, { nombre: obj.descripcion || '' });
+      }
     }
   } catch (err) {
     showToast(err.message || 'Error al guardar la orden', 'err');

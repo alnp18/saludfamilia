@@ -784,6 +784,56 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .med-status-ribbon.inactive { color:var(--ts);        background:var(--surface); }
 .med-status-ribbon.ending   { color:var(--amber-lt);  background:var(--amber-dim); }
 
+/* ══ Auditoría de Medicamentos (2026-07-17) ══ */
+.meds-group { margin-bottom:22px; }
+/* Acentos por grupo de la jerarquía (controlados / horario / a demanda) */
+.meds-section-label.g-red     { color:var(--red-lt); }
+.meds-section-label.g-red .meds-count     { background:var(--red-dim);    color:var(--red-lt);    border-color:rgba(239,68,68,.2); }
+.meds-section-label.g-primary { color:var(--t-primary-lt); }
+.meds-section-label.g-purple  { color:var(--purple-lt); }
+.meds-section-label.g-purple .meds-count  { background:var(--purple-dim); color:var(--purple-lt); border-color:rgba(139,92,246,.2); }
+
+/* Medicamento controlado: acento rojo sutil en la tarjeta + badge */
+.med-card.controlado { border-color:rgba(239,68,68,.35); }
+.med-card.controlado .med-avatar { background:var(--red-dim); }
+.med-card.controlado .med-avatar svg { color:var(--red-lt); }
+.med-badge-controlado { display:inline-block; margin-left:7px; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--red-lt); background:var(--red-dim); border:1px solid rgba(239,68,68,.25); border-radius:5px; padding:1px 6px; vertical-align:middle; }
+
+/* Indicación (enfermedad/síntoma) */
+.med-indicacion { font-size:12.5px; color:var(--tp); line-height:1.5; }
+.med-indicacion-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:var(--ts); margin-right:5px; }
+
+/* Bloque de uso "a demanda" en la tarjeta */
+.med-uso-block { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border-lt); border-radius:9px; padding:9px 12px; }
+.med-uso-info { flex:1; min-width:0; display:flex; align-items:baseline; gap:7px; }
+.med-uso-count { font-size:19px; font-weight:700; color:var(--purple-lt); font-family:'JetBrains Mono',monospace; line-height:1; }
+.med-uso-label { font-size:11px; color:var(--ts); line-height:1.35; }
+.btn-uso { background:var(--purple-dim); color:var(--purple-lt); border-color:rgba(139,92,246,.3); font-weight:700; letter-spacing:.5px; flex-shrink:0; }
+.btn-uso:hover { background:var(--purple); color:#fff; border-color:transparent; }
+
+/* Widget "Medicamentos a demanda" del dashboard */
+.dmd-item { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:9px; padding:9px 12px; }
+.dmd-info { flex:1; min-width:0; }
+.dmd-name { font-size:13px; font-weight:700; color:var(--tp); }
+.dmd-sub { font-size:11px; color:var(--ts); margin-top:2px; }
+
+/* Grupo colapsable de inactivos */
+.meds-inactive-group { margin-top:6px; }
+.meds-inactive-toggle { display:flex; align-items:center; gap:8px; width:100%; background:none; border:none; cursor:pointer; padding:0 0 14px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--ts); }
+.meds-inactive-toggle:hover { color:var(--tp); }
+.meds-inactive-toggle .chev { transition:transform .15s; }
+.meds-inactive-toggle.open .chev { transform:rotate(90deg); }
+
+/* Modal de registro de uso */
+.uso-list { border-top:1px solid var(--border); padding-top:12px; margin-top:2px; }
+.uso-item { display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:8px 11px; margin-bottom:7px; }
+.uso-item-date { font-size:11px; font-weight:700; color:var(--purple-lt); font-family:'JetBrains Mono',monospace; }
+.uso-item-razon { font-size:12.5px; color:var(--tp); line-height:1.4; margin-top:2px; }
+
+/* Fila de checkbox reutilizable en formularios */
+.ck-row { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; font-size:13px; font-weight:600; }
+.ck-row input { width:16px; height:16px; flex-shrink:0; }
+
 .hist-group { margin-bottom:18px; }
 .hist-group-name { font-size:13.5px; font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
 .hist-timeline { position:relative; padding-left:20px; }
