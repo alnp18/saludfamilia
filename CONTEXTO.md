@@ -2,9 +2,11 @@
 
 _Última actualización: 2026-07-17 (P1.5 completa + P2 100% completa +
 backlog "MI AUDITORIA" + segunda auditoría de Ficha de paciente + tercera
-auditoría de Medicamentos + cuarta auditoría de Signos Vitales: hora de
-toma, edad automática, peso gramos/kg por edad, altura/longitud tibial y
-frecuencia respiratoria)_
+auditoría de Medicamentos + cuarta auditoría de Signos Vitales (hora de
+toma, edad automática, peso gramos/kg por edad, altura/longitud tibial,
+frecuencia respiratoria y perímetro cefálico) + **cierre de esta tanda**:
+reinicio completo de datos de prueba en producción y verificación final
+de que todo lo anterior está desplegado y en línea)_
 
 ## Qué es
 
@@ -56,8 +58,21 @@ frente, con prioridad y agente recomendado, está en
    **COMPLETADO** el 2026-07-16: 5 ajustes en Ficha de paciente y una
    restructuración de 5 partes en Órdenes médicas. No estaba en el plan
    original — ver sección dedicada abajo.
-10. Pieza A de arquitectura (directorio público auditado de médicos y
+10. ✅ Segunda auditoría de Ficha de paciente, tercera auditoría de
+    Medicamentos y cuarta auditoría de Signos Vitales (con perímetro
+    cefálico) — **COMPLETADAS y DESPLEGADAS** el 2026-07-17. Detalle en
+    las secciones dedicadas abajo.
+11. ✅ **Cierre de esta tanda: reinicio de datos de prueba +
+    verificación final de despliegue — COMPLETADO** el 2026-07-17. Con
+    esto la app queda en un estado limpio y verificado, lista para uso
+    real (no solo de prueba). Detalle en la sección dedicada abajo.
+12. Pieza A de arquitectura (directorio público auditado de médicos y
     centros), diseñada a alto nivel pero sin implementar (Fable).
+13. Cinco ideas de crecimiento futuro relevadas por la usuaria (sección
+    de vacunación, hospitalización, seguimiento de embarazo, odontología,
+    roles administrador/médico) — **explícitamente diferidas**, ver
+    sección dedicada abajo. No emprender ninguna sin que la usuaria lo
+    pida de nuevo.
 
 ## Arquitectura
 
@@ -153,19 +168,42 @@ saludfamilia/
   `saludfamilia-alnp.vercel.app` y `saludfamilia-git-main-alnp.vercel.app`).
   Deployment Protection desactivado. Variables `VITE_SUPABASE_URL` y
   `VITE_SUPABASE_ANON_KEY` en el environment **Production**. Cada push a
-  `main` dispara deploy automático.
+  `main` dispara deploy automático. **Verificado el 2026-07-17**: el
+  deployment `dpl_9o7jRBLykiycrwE5LKHqNQVUHo2Z` (commit `bfa527b`, target
+  `production`) está `READY` y es el más reciente — con esto las cuatro
+  auditorías completadas esta sesión (Ficha de paciente #2, Medicamentos,
+  Signos Vitales y perímetro cefálico) están confirmadas **en línea en
+  producción**, no solo mergeadas en `main`. Nota operativa: el primer
+  push del commit de perímetro cefálico (`1259a79`) no disparó deploy
+  automático (hiccup del webhook GitHub→Vercel, no un problema del
+  código); se resolvió con un segundo push vacío (`bfa527b`) — si vuelve
+  a pasar, ese es el remedio más simple antes de investigar más.
 - **GitHub**: [alnp18/saludfamilia](https://github.com/alnp18/saludfamilia),
   rama `main`. **Sin conector MCP para Claude ni credenciales de `git push`**
   en el sandbox de las sesiones — reconfirmado el 2026-07-16 (`git push`
   falla con `could not read Username for 'https://github.com': terminal
   prompts disabled`). El repo es público, así que sí se puede clonar en
-  modo lectura sin credenciales; el patrón que funciona es generar un
-  `git bundle` (`git bundle create archivo.bundle origin/main..main`),
-  entregarlo con `SendUserFile` + `device_commit_files` a `~/Downloads/`
-  del usuario, y que el usuario lo fusione y empuje desde su PowerShell
-  local (`git fetch archivo.bundle main:bundle-N` → `git merge bundle-N`
-  → `git push origin main`). Usado con éxito repetidas veces durante la
-  sesión de MI AUDITORIA. Verificar deploys con `Vercel:list_deployments`.
+  modo lectura sin credenciales.
+  **Patrón de entrega preferido (usado desde la segunda auditoría en
+  adelante)**: el clon real y autoritativo vive en el propio equipo de
+  la usuaria (`C:\Users\alnp1\OneDrive\Escritorio\saludfamilia`). Se edita
+  y commitea en el sandbox solo para el propio historial/diff de Claude;
+  los archivos finales se escriben **directamente en el disco de la
+  usuaria** con `SendUserFile` + `mcp__remote-devices__device_commit_files`
+  en las mismas rutas relativas, y es **la usuaria** quien corre
+  `git add -A && git commit && git push` desde su PowerShell local. Más
+  simple y directo que el patrón anterior. **Patrón anterior (bundle),
+  usado durante la sesión de MI AUDITORIA — dejar como referencia si
+  hiciera falta**: generar un `git bundle` (`git bundle create
+  archivo.bundle origin/main..main`), entregarlo con `SendUserFile` +
+  `device_commit_files` a `~/Downloads/`, y que la usuaria lo fusione y
+  empuje (`git fetch archivo.bundle main:bundle-N` → `git merge bundle-N`
+  → `git push origin main`).
+  **Nota de despliegue**: un push a `main` a veces no dispara el webhook
+  de Vercel (visto con el commit de perímetro cefálico, `1259a79`); el
+  remedio simple es un segundo push, aunque sea un commit vacío
+  (`git commit --allow-empty`). Verificar siempre con
+  `Vercel:list_deployments` tras cualquier push, no asumir que corrió.
 - **Navegador (Claude in Chrome)**: la extensión NO viene conectada por
   defecto. Para un E2E real por UI hay que pedirle al usuario que active la
   extensión y dé permiso al dominio `saludfamilia.vercel.app`. Con la
@@ -176,30 +214,34 @@ saludfamilia/
 
 ## Estado de los datos (importante para el próximo agente)
 
-**La base de datos de producción está vacía de datos clínicos de nuevo.**
-Conteo real verificado por SQL el 2026-07-16 (después del backlog MI
-AUDITORIA, sin que esta sesión escribiera datos de prueba — todas las
-verificaciones de MI AUDITORIA se hicieron con Playwright reconstruyendo
-HTML en local, no contra Supabase):
+**La base de datos de producción está deliberadamente vacía de datos
+clínicos**, tras un borrado explícito y confirmado por la usuaria el
+2026-07-17 (ver sección "Cierre de esta tanda" abajo para el detalle de
+la decisión y el SQL ejecutado). Conteo real verificado por SQL el
+2026-07-17, después del borrado:
 
-- `auth.users`: **2** (`alnp.alnp@gmail.com` y `dacn.2026@gmail.com`).
-- `households`: 2 · `household_members`: 2.
+- `auth.users`: **3** cuentas reales (se conservan intactas — el borrado
+  fue solo de datos clínicos, nunca de cuentas ni membresías).
+- `households`: 4 · `household_members`: 4 — intactos.
 - `patients`, `medical_orders`, `medications`, `doctors`,
   `medical_centers`, `vital_signs`, `patient_policies`,
-  `patient_diagnoses`, `order_authorizations`: **0 en todas** — el volumen
-  de datos de prueba que existía tras el E2E de P1.5 (18 órdenes, 3
-  medicamentos, 4 médicos, 4 centros, etc.) **ya no está**; alguien lo
-  limpió entre sesiones (no fue esta sesión).
-- `custom_catalog_options`: **2** (quedan `especialidad =
-  "Endocrinologia"` y `via_administracion = "Grandes Pliegues"`, restos
-  de pruebas del patrón "Otra… extensible" — limpieza opcional, no
-  bloqueante).
+  `patient_diagnoses`, `order_authorizations`, `med_usage_events`,
+  `custom_catalog_options`, `household_invitations`: **0 en todas** — se
+  incluyó explícitamente `custom_catalog_options` en este borrado (a
+  diferencia de la limpieza previa del 2026-07-16, que la había dejado
+  con 2 filas residuales).
+- **Storage**: el bucket `adjuntos` tenía 8 archivos huérfanos (sin fila
+  que los referenciara, ya que un DELETE por SQL no toca Storage). La
+  usuaria los eliminó manualmente desde el dashboard de Supabase — el
+  bucket queda limpio.
 
-**Consecuencia práctica**: la base está en buen estado para un E2E limpio
-de MI AUDITORIA (Avatar, Pólizas, Crónicos, Autorizaciones, Flujo) contra
-producción si se quiere verificar por UI real — hoy solo se verificó con
-capturas de pantalla locales, no con datos reales. El esquema, funciones,
-triggers y políticas RLS están intactos.
+**Consecuencia práctica**: la base queda en un estado limpio de fábrica
+(esquema, funciones, triggers y políticas RLS intactos; cero datos
+clínicos; cuentas/households/membresías preservados) lista para uso
+real por la usuaria y su familia, o para un próximo E2E completo por UI
+si se quiere verificar todo el backlog reciente (Avatar, Pólizas,
+Crónicos, Autorizaciones, Flujo, Medicamentos, Signos Vitales con
+perímetro cefálico) contra datos reales en vez de capturas locales.
 
 ## Resultado de la verificación E2E en producción (2026-07-15)
 
@@ -768,6 +810,64 @@ otra sesión): si alguna vez se necesita registrar *altura y longitud
 tibial a la vez* en un mismo control, el diseño actual no lo contempla
 (son excluyentes).
 
+## Cierre de esta tanda — reinicio de datos y verificación final de despliegue (completado 2026-07-17)
+
+Tras cerrar las cuatro auditorías (Ficha de paciente #2, Medicamentos,
+Signos Vitales, perímetro cefálico), la usuaria preguntó qué hacía falta
+para dar la app por terminada "en este nivel" y usable de verdad, y pidió
+borrar los datos usados en pruebas E2E antes de ese último paso. Se seguí
+un protocolo de confirmación explícita en dos tiempos antes de cualquier
+borrado contra producción.
+
+- **Decisión de alcance**: se presentó el conteo real de filas por tabla
+  y por cuenta, distinguiendo **datos clínicos** (seguro de borrar: no
+  hay forma de que alguien vuelva a registrarse con ellos) de
+  **estructura de auth/household/membresía** (debe preservarse, para que
+  nadie tenga que volver a crear cuenta ni family). La usuaria eligió
+  explícitamente: borrar los datos clínicos de **las tres cuentas**.
+- **Confirmación explícita de la sentencia SQL**: antes de ejecutar nada,
+  se mostró el DELETE exacto (todas las tablas clínicas, con condición
+  para no tocar `auth.users`/`households`/`household_members`) y se
+  esperó confirmación literal ("Sí, bórralo") antes de correrlo.
+- **Ejecutado y verificado**: los 12 tablas clínicas quedaron en 0 filas;
+  `auth.users` (3), `households` (4) y `household_members` (4) quedaron
+  intactos — verificado con una query de verificación etiquetada
+  ('CLINICOS (deben ser 0)' vs 'CONSERVADO') inmediatamente después del
+  borrado.
+- **Storage**: el DELETE por SQL no toca `storage.objects` (Supabase
+  bloquea el borrado directo sobre esa tabla); quedaron 8 archivos
+  huérfanos en el bucket `adjuntos`. La usuaria los eliminó a mano desde
+  el dashboard de Supabase.
+- **Verificación final de despliegue**: se confirmó que el commit del
+  perímetro cefálico (`bfa527b`, tras un segundo push vacío porque el
+  primero no disparó el webhook de Vercel — ver nota en Infraestructura)
+  está `READY` en producción, el deployment más reciente. Con esto **las
+  cuatro auditorías de esta sesión están confirmadas en línea**, no solo
+  mergeadas en `main`.
+
+**Resultado**: la app queda con el esquema completo, RLS intacto, cero
+datos de prueba, y todo el código reciente verificado en producción —
+lista para uso real por la usuaria y su familia. Ver "Estado de los
+datos" arriba para el detalle numérico.
+
+## Ideas de crecimiento futuro (explícitamente diferidas, no en curso)
+
+La usuaria compartió cinco ideas para ampliar el proyecto, aclarando
+ella misma que **"pueden ser estudiadas a futuro"** porque las considera
+"muy grandes en este momento". Ninguna está diseñada ni tiene tareas
+asociadas — quedan aquí solo como registro, para que un futuro agente no
+las de por implícitamente solicitadas. **No iniciar diseño ni
+implementación de ninguna sin que la usuaria lo pida de nuevo:**
+
+1. Sección de vacunación.
+2. Ventana completa para hospitalización.
+3. Interfaz completa de seguimiento de mujeres embarazadas.
+4. Interfaz completa de odontología y salud oral.
+5. Roles "administrador" (para curar el directorio público que se vaya
+   formando — se conecta con la Pieza A de arquitectura, ver abajo) y
+   "médico" (para que médicos vean historias clínicas de pacientes que
+   se las compartan).
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -826,7 +926,17 @@ tibial a la vez* en un mismo control, el diseño actual no lo contempla
     conversación y revisada/integrada acá): hora de toma, edad automática,
     peso gramos/kg por edad, altura/longitud tibial, y frecuencia
     respiratoria (además graficable). Ver sección dedicada arriba.
-16. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
+16. **Cierre de esta tanda: reinicio de datos + verificación de
+    despliegue — COMPLETADO** el 2026-07-17: borrado confirmado de todos
+    los datos clínicos de las 3 cuentas (auth/households/membresías
+    preservados), limpieza manual de 8 archivos huérfanos en Storage, y
+    confirmación de que el commit de perímetro cefálico (`bfa527b`) está
+    `READY` en producción. Ver sección dedicada arriba.
+17. **Cinco ideas de crecimiento futuro relevadas y explícitamente
+    diferidas** por la usuaria (vacunación, hospitalización, seguimiento
+    de embarazo, odontología, roles admin/médico). Ver sección dedicada
+    arriba — no emprender sin pedido nuevo.
+18. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
     directorio público auditado de médicos y centros.
 
 ## Criterio de asignación de agentes de Claude
@@ -844,31 +954,38 @@ tibial a la vez* en un mismo control, el diseño actual no lo contempla
 
 ## Próximos pasos sugeridos para quien retome
 
-Con P1.5, P2 (4/4) y MI AUDITORIA completos, no queda ningún ítem
-numerado del plan original pendiente. Lo que sigue es priorizar entre lo
-no planeado / de mantenimiento:
+Con P1.5, P2 (4/4), MI AUDITORIA y las cuatro auditorías adicionales de
+esta sesión completos y **desplegados en producción con datos limpios**,
+no queda ningún ítem numerado del plan original pendiente y la app está
+en condiciones de uso real. Lo que sigue es priorizar entre lo no
+planeado / de mantenimiento:
 
-1. E2E corto de adjuntos "clásico" en producción si no se ha hecho desde
-   el cambio de imágenes/documentos: subir, ver, reemplazar y eliminar
-   (verifica la limpieza del bucket), y de paso probar por UI real el
-   backlog MI AUDITORIA (Avatar, Pólizas con aseguradora, Crónicos,
-   Autorizaciones mes a mes, pestaña Flujo) — hasta ahora solo se
-   verificó con capturas de pantalla locales, no contra producción.
+1. Uso real por la usuaria y su familia — la base ya no tiene datos de
+   prueba (ver "Estado de los datos" arriba), así que cualquier dato que
+   se cargue de ahora en más es real. Si en algún momento se quiere un
+   E2E completo por UI (Avatar, Pólizas con aseguradora, Crónicos,
+   Autorizaciones mes a mes, pestaña Flujo, Medicamentos, Signos Vitales
+   con perímetro cefálico) antes de confiar datos reales, hacerlo ahora
+   que la base está vacía — hasta hoy solo se verificó con capturas de
+   pantalla locales, no contra producción.
 2. Antes de tocar cualquier política RLS nueva, reproducir el error primero
    con `set local role authenticated` + `request.jwt.claims` simulados en
    una transacción con `rollback` (patrón usado con éxito en todos los
    E2E de seguridad de este proyecto). Ojo: `is_household_member` ahora
    vive en el schema `private`, y Supabase bloquea DELETEs directos sobre
    `storage.objects` (usar la API de Storage).
-3. La base de producción está sin datos clínicos (ver "Estado de los
-   datos" arriba) — buen momento para decidir si el próximo E2E genera
-   datos de muestra a conservar o si se prueba y se limpia.
+3. Las cinco ideas de crecimiento futuro relevadas por la usuaria
+   (vacunación, hospitalización, embarazo, odontología, roles
+   admin/médico) están **explícitamente diferidas** — no diseñar ni
+   implementar ninguna sin que la usuaria lo pida de nuevo. Ver sección
+   dedicada arriba.
 4. Pieza A de arquitectura (directorio público auditado) — diseño
    detallado con Fable cuando se decida priorizarla. El usuario confirmó
    que tiene sentido invertir en esto (espera más familias usando la
    app), pero el diseño de detalle (mecanismo de rol admin, si se
    rastrea la procedencia de copias del directorio público al privado)
-   quedó sin cerrar — retomar solo si el usuario lo pide de nuevo.
+   quedó sin cerrar — retomar solo si el usuario lo pide de nuevo. Se
+   relaciona con la idea diferida #5 (rol "administrador").
 5. Si algún día se pasa al plan Pro de Supabase: activar "Leaked
    password protection" (HaveIBeenPwned) en Auth — hoy rechazado por la
    API en el plan gratuito; el mínimo de contraseña ya se subió a 8.
