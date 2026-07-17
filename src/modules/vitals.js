@@ -16,6 +16,25 @@ const VITAL_FIELDS = [
   { key: 'perCadera', label: 'P. cadera', unit: 'cm', color: '#22c55e', low: null, high: null },
 ];
 
+// Calcula la edad (en años cumplidos) entre la fecha de nacimiento y la fecha del registro.
+function calcEdad(fechaNacimiento, fechaRegistro) {
+  if (!fechaNacimiento || !fechaRegistro) return null;
+  const nac = new Date(fechaNacimiento + 'T00:00:00');
+  const reg = new Date(fechaRegistro + 'T00:00:00');
+  if (isNaN(nac) || isNaN(reg) || reg < nac) return null;
+  let edad = reg.getFullYear() - nac.getFullYear();
+  const m = reg.getMonth() - nac.getMonth();
+  if (m < 0 || (m === 0 && reg.getDate() < nac.getDate())) edad--;
+  return edad;
+}
+
+// true si el paciente tiene menos de 2 años cumplidos en la fecha del registro
+// (en ese rango el peso se ingresa en gramos).
+function usaGramos(fechaNacimiento, fechaRegistro) {
+  const edad = calcEdad(fechaNacimiento, fechaRegistro);
+  return edad != null && edad < 2;
+}
+
 let vActiveField = 'peso';
 let pendingOptions = null;
 export function setPendingOptions(opts) { pendingOptions = opts; }
@@ -252,12 +271,24 @@ function renderVitalsTable(records) {
 
   const COLS = [
     { key: 'fecha', label: 'Fecha', fmt: v => fmtDate(v) },
-    { key: 'peso', label: 'Peso (kg)', fmt: v => v || '—' },
+    { key: 'hora', label: 'Hora', fmt: v => v ? v.slice(0, 5) : '—' },
+    { key: 'peso', label: 'Peso', fmt: (v, r) => {
+        if (v == null || v === '') return '—';
+        // Menor de 2 años en la fecha del registro: mostrar en gramos.
+        return usaGramos(state.activePatient?.fechaNacimiento, r.fecha)
+          ? Math.round(v * 1000) + ' g'
+          : v + ' kg';
+      } },
+    { key: 'estatura', label: 'Estatura (cm)', fmt: (v, r) => {
+        if (r.longitudTibial != null && r.longitudTibial !== '') return r.longitudTibial + ' (tibial)';
+        return r.altura != null && r.altura !== '' ? r.altura : '—';
+      } },
     { key: 'presion', label: 'Presión (mmHg)', fmt: (v, r) => r.presionSis && r.presionDia ? r.presionSis + '/' + r.presionDia : '—' },
     { key: 'glucosa', label: 'Glucosa (mg/dL)', fmt: v => v || '—' },
     { key: 'saturacion', label: 'SpO₂ (%)', fmt: v => v || '—' },
     { key: 'temperatura', label: 'Temp (°C)', fmt: v => v || '—' },
     { key: 'frecCardiaca', label: 'F.C. (bpm)', fmt: v => v || '—' },
+    { key: 'frecRespiratoria', label: 'F.R. (rpm)', fmt: v => v || '—' },
   ];
 
   const thead = '<tr>' + COLS.map(c => `<th>${c.label}</th>`).join('') + '<th style="text-align:right">Acciones</th></tr>';
@@ -285,21 +316,50 @@ async function openVitalModal(id) {
     }
   }
 
+  const fechaNac = state.activePatient?.fechaNacimiento || null;
+  const fechaInicial = r?.fecha || today();
+  const edadInicial = calcEdad(fechaNac, fechaInicial);
+  const gramosInicial = usaGramos(fechaNac, fechaInicial);
+  // Modo de medición de estatura: 'altura' o 'tibial'. Si el registro ya trae
+  // longitud tibial cargada, arranca en ese modo.
+  const modoEstatura = r?.longitudTibial != null && r?.longitudTibial !== '' ? 'tibial' : 'altura';
+
+  // El peso se guarda siempre en kg. Si el paciente usa gramos, mostramos el
+  // valor convertido a gramos en el input, pero al guardar se reconvierte a kg.
+  const pesoMostrado = r?.peso != null && r?.peso !== ''
+    ? (gramosInicial ? Math.round(r.peso * 1000) : r.peso)
+    : '';
+
   showModal(
     id ? 'Editar registro de signos vitales' : 'Nuevo registro de signos vitales',
     `<div class="form-body">
       <div class="vital-form-section">
         <div class="vital-form-section-title">General</div>
         <div class="form-row cols-2">
-          <div class="form-field"><label class="fl">Fecha *</label><input class="fi" id="vf-fecha" type="date" value="${r?.fecha || today()}"/></div>
-          <div class="form-field"><label class="fl">Edad (en esta fecha)</label><input class="fi" id="vf-edad" type="number" min="0" max="120" placeholder="años" value="${r?.edad || ''}"/></div>
+          <div class="form-field"><label class="fl">Fecha *</label><input class="fi" id="vf-fecha" type="date" value="${fechaInicial}"/></div>
+          <div class="form-field"><label class="fl">Hora de la toma</label><input class="fi" id="vf-hora" type="time" value="${r?.hora ? r.hora.slice(0,5) : ''}"/></div>
+          <div class="form-field"><label class="fl">Edad (en esta fecha)</label><input class="fi" id="vf-edad" type="text" readonly value="${edadInicial != null ? edadInicial + ' años' : '—'}"/></div>
         </div>
       </div>
       <div class="vital-form-section">
         <div class="vital-form-section-title">Antropometría</div>
         <div class="form-row cols-2">
-          <div class="form-field"><label class="fl">Peso (kg)</label><input class="fi" id="vf-peso" type="number" step="0.1" min="1" placeholder="Ej: 68.5" value="${r?.peso || ''}"/></div>
-          <div class="form-field"><label class="fl">Altura (cm)</label><input class="fi" id="vf-altura" type="number" step="0.1" min="1" placeholder="Ej: 170" value="${r?.altura || ''}"/></div>
+          <div class="form-field">
+            <label class="fl">Peso (<span id="vf-peso-unit">${gramosInicial ? 'g' : 'kg'}</span>)</label>
+            <input class="fi" id="vf-peso" type="number" step="${gramosInicial ? '1' : '0.1'}" min="0" placeholder="${gramosInicial ? 'Ej: 3450' : 'Ej: 68.5'}" value="${pesoMostrado}"/>
+            <div class="fl" id="vf-peso-hint" style="margin-top:4px;font-size:11px;color:var(--ts)">${gramosInicial ? 'Menor de 2 años: ingresa el peso en gramos.' : ''}</div>
+          </div>
+          <div class="form-field">
+            <label class="fl">Medición de estatura</label>
+            <select class="fi" id="vf-estatura-modo">
+              <option value="altura" ${modoEstatura === 'altura' ? 'selected' : ''}>Altura (cm)</option>
+              <option value="tibial" ${modoEstatura === 'tibial' ? 'selected' : ''}>Longitud tibial (cm)</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label class="fl"><span id="vf-estatura-label">${modoEstatura === 'tibial' ? 'Longitud tibial (cm)' : 'Altura (cm)'}</span></label>
+            <input class="fi" id="vf-estatura-val" type="number" step="0.1" min="1" placeholder="cm" value="${modoEstatura === 'tibial' ? (r?.longitudTibial || '') : (r?.altura || '')}"/>
+          </div>
           <div class="form-field"><label class="fl">Perímetro cintura (cm)</label><input class="fi" id="vf-cintura" type="number" step="0.1" placeholder="cm" value="${r?.perCintura || ''}"/></div>
           <div class="form-field"><label class="fl">Perímetro cadera (cm)</label><input class="fi" id="vf-cadera" type="number" step="0.1" placeholder="cm" value="${r?.perCadera || ''}"/></div>
           <div class="form-field"><label class="fl">Perímetro brazo (cm)</label><input class="fi" id="vf-brazo" type="number" step="0.1" placeholder="cm" value="${r?.perBrazo || ''}"/></div>
@@ -314,6 +374,7 @@ async function openVitalModal(id) {
           <div class="form-field"><label class="fl">Saturación O₂ (%)</label><input class="fi" id="vf-spo2" type="number" min="70" max="100" placeholder="Ej: 97" value="${r?.saturacion || ''}"/></div>
           <div class="form-field"><label class="fl">Glucosa (mg/dL)</label><input class="fi" id="vf-gluc" type="number" min="30" max="600" placeholder="Ej: 95" value="${r?.glucosa || ''}"/></div>
           <div class="form-field"><label class="fl">Frec. cardíaca (bpm)</label><input class="fi" id="vf-fc" type="number" min="30" max="250" placeholder="Ej: 72" value="${r?.frecCardiaca || ''}"/></div>
+          <div class="form-field"><label class="fl">Frec. respiratoria (rpm)</label><input class="fi" id="vf-fr" type="number" min="5" max="90" placeholder="Ej: 16" value="${r?.frecRespiratoria || ''}"/></div>
         </div>
       </div>
       <div class="vital-form-section" style="margin-bottom:0">
@@ -327,6 +388,29 @@ async function openVitalModal(id) {
     ]
   );
   setModalMaxWidth('620px');
+
+  // Recalcular edad y unidad de peso cuando cambia la fecha.
+  const fechaEl = document.getElementById('vf-fecha');
+  const edadEl = document.getElementById('vf-edad');
+  const pesoUnitEl = document.getElementById('vf-peso-unit');
+  const pesoInputEl = document.getElementById('vf-peso');
+  const pesoHintEl = document.getElementById('vf-peso-hint');
+  fechaEl.addEventListener('change', () => {
+    const nuevaEdad = calcEdad(fechaNac, fechaEl.value);
+    edadEl.value = nuevaEdad != null ? nuevaEdad + ' años' : '—';
+    const g = usaGramos(fechaNac, fechaEl.value);
+    pesoUnitEl.textContent = g ? 'g' : 'kg';
+    pesoInputEl.step = g ? '1' : '0.1';
+    pesoInputEl.placeholder = g ? 'Ej: 3450' : 'Ej: 68.5';
+    pesoHintEl.textContent = g ? 'Menor de 2 años: ingresa el peso en gramos.' : '';
+  });
+
+  // Alternar etiqueta del campo de estatura según el modo elegido.
+  const modoEl = document.getElementById('vf-estatura-modo');
+  const estaturaLabelEl = document.getElementById('vf-estatura-label');
+  modoEl.addEventListener('change', () => {
+    estaturaLabelEl.textContent = modoEl.value === 'tibial' ? 'Longitud tibial (cm)' : 'Altura (cm)';
+  });
 }
 
 async function saveVitalForm(editId) {
@@ -334,12 +418,29 @@ async function saveVitalForm(editId) {
   const fecha = document.getElementById('vf-fecha').value;
   if (!fecha) { showToast('La fecha es obligatoria', 'err'); return; }
 
+  const fechaNac = state.activePatient?.fechaNacimiento || null;
+
+  // Peso: el input está en gramos si el paciente es menor de 2 años; se guarda
+  // siempre en kg.
+  const pesoRaw = document.getElementById('vf-peso').value;
+  let pesoKg = null;
+  if (pesoRaw !== '' && pesoRaw != null) {
+    pesoKg = usaGramos(fechaNac, fecha) ? (parseFloat(pesoRaw) / 1000) : parseFloat(pesoRaw);
+  }
+
+  // Estatura: según el modo, el valor va a 'altura' o a 'longitudTibial'; el otro
+  // queda null para no arrastrar un dato que no corresponde a esta medición.
+  const modoEstatura = document.getElementById('vf-estatura-modo').value;
+  const estaturaVal = document.getElementById('vf-estatura-val').value || null;
+
   const obj = {
     id: editId || undefined,
     fecha,
-    edad: document.getElementById('vf-edad').value || null,
-    peso: document.getElementById('vf-peso').value || null,
-    altura: document.getElementById('vf-altura').value || null,
+    hora: document.getElementById('vf-hora').value || null,
+    edad: calcEdad(fechaNac, fecha),
+    peso: pesoKg,
+    altura: modoEstatura === 'altura' ? estaturaVal : null,
+    longitudTibial: modoEstatura === 'tibial' ? estaturaVal : null,
     perCintura: document.getElementById('vf-cintura').value || null,
     perCadera: document.getElementById('vf-cadera').value || null,
     perBrazo: document.getElementById('vf-brazo').value || null,
@@ -349,6 +450,7 @@ async function saveVitalForm(editId) {
     saturacion: document.getElementById('vf-spo2').value || null,
     glucosa: document.getElementById('vf-gluc').value || null,
     frecCardiaca: document.getElementById('vf-fc').value || null,
+    frecRespiratoria: document.getElementById('vf-fr').value || null,
     notas: document.getElementById('vf-notas').value.trim(),
   };
 

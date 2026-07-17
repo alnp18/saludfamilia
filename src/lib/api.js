@@ -633,12 +633,13 @@ export async function removeMember(householdId, userId) {
 // ─────────────────────────────────────────
 function rowToVital(r) {
   return {
-    id: r.id, patientId: r.patient_id, fecha: r.fecha, edad: r.edad,
-    peso: r.peso, altura: r.altura, perCintura: r.per_cintura,
-    perCadera: r.per_cadera, perBrazo: r.per_brazo,
+    id: r.id, patientId: r.patient_id, fecha: r.fecha, hora: r.hora, edad: r.edad,
+    peso: r.peso, altura: r.altura, longitudTibial: r.longitud_tibial,
+    perCintura: r.per_cintura, perCadera: r.per_cadera, perBrazo: r.per_brazo,
     presionSis: r.presion_sistolica, presionDia: r.presion_diastolica,
     temperatura: r.temperatura, saturacion: r.saturacion, glucosa: r.glucosa,
-    frecCardiaca: r.frecuencia_cardiaca, notas: r.notas, creadoEn: r.created_at,
+    frecCardiaca: r.frecuencia_cardiaca, frecRespiratoria: r.frecuencia_respiratoria,
+    notas: r.notas, creadoEn: r.created_at,
   };
 }
 function vitalToRow(v, householdId, patientId) {
@@ -646,9 +647,12 @@ function vitalToRow(v, householdId, patientId) {
     household_id: householdId,
     patient_id: patientId,
     fecha: v.fecha,
+    hora: v.hora || null,
     edad: v.edad || null,
     peso: v.peso || null,
     altura: v.altura || null,
+    longitud_tibial: v.longitudTibial || null,
+    frecuencia_respiratoria: v.frecRespiratoria || null,
     per_cintura: v.perCintura || null,
     per_cadera: v.perCadera || null,
     per_brazo: v.perBrazo || null,
