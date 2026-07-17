@@ -12,6 +12,7 @@ const VITAL_FIELDS = [
   { key: 'saturacion', label: 'Saturación O₂', unit: '%', color: '#3b82f6', low: 95, high: 100 },
   { key: 'temperatura', label: 'Temperatura', unit: '°C', color: '#f97316', low: 36, high: 37.5 },
   { key: 'frecCardiaca', label: 'Frec. cardíaca', unit: 'bpm', color: '#ec4899', low: 60, high: 100 },
+  { key: 'frecRespiratoria', label: 'Frec. respiratoria', unit: 'rpm', color: '#06b6d4', low: 12, high: 20 },
   { key: 'perCintura', label: 'P. cintura', unit: 'cm', color: '#8b5cf6', low: null, high: null },
   { key: 'perCadera', label: 'P. cadera', unit: 'cm', color: '#22c55e', low: null, high: null },
 ];

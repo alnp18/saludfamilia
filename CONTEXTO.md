@@ -1,10 +1,10 @@
 # SaludFamilia — Contexto del proyecto
 
 _Última actualización: 2026-07-17 (P1.5 completa + P2 100% completa +
-backlog "MI AUDITORIA" + segunda auditoría de Ficha de paciente: recorte
-de imagen, editar pólizas/diagnósticos, fix del selector de tipo + tercera
-auditoría de Medicamentos: indicación, controlado, usos a demanda,
-agrupación jerárquica y unificación Órdenes→Medicamento)_
+backlog "MI AUDITORIA" + segunda auditoría de Ficha de paciente + tercera
+auditoría de Medicamentos + cuarta auditoría de Signos Vitales: hora de
+toma, edad automática, peso gramos/kg por edad, altura/longitud tibial y
+frecuencia respiratoria)_
 
 ## Qué es
 
@@ -82,7 +82,8 @@ saludfamilia/
 │       ├── 0014_diagnosticos_cronicos.sql    ← MI AUDITORIA Pacientes #5
 │       ├── 0015_autorizaciones_medicamentos.sql ← MI AUDITORIA Órdenes #4
 │       ├── 0016_patient_diagnoses_update_rls.sql ← 2ª auditoría (editar diagnósticos)
-│       └── 0017_medicamentos_indicacion_controlado_usos.sql ← auditoría Medicamentos
+│       ├── 0017_medicamentos_indicacion_controlado_usos.sql ← auditoría Medicamentos
+│       └── 0018_vital_signs_auditoria.sql       ← auditoría Signos Vitales
 ├── src/
 │   ├── lib/
 │   │   ├── supabaseClient.js
@@ -122,12 +123,20 @@ saludfamilia/
 ## Infraestructura
 
 - **Supabase**: proyecto `smbnogsvqaowfwqchuvy` (región `sa-east-1`),
-  `ACTIVE_HEALTHY`, **17 migraciones** aplicadas (`0012`–`0015` del backlog
+  `ACTIVE_HEALTHY`, **18 migraciones** aplicadas (`0012`–`0015` del backlog
   MI AUDITORIA: avatar de paciente, aseguradora de pólizas, diagnósticos
   crónicos CIE10, y autorizaciones mes a mes de Órdenes; `0016` de la
   segunda auditoría: política RLS de UPDATE en `patient_diagnoses`; `0017`
   de la auditoría de Medicamentos: columnas `indicacion`/`controlado` en
-  `medications` y tabla nueva `med_usage_events` con RLS).
+  `medications` y tabla nueva `med_usage_events` con RLS; `0018` de la
+  auditoría de Signos Vitales: columnas `hora`/`frecuencia_respiratoria`/
+  `longitud_tibial` en `vital_signs` y `peso` ampliado a `numeric(6,3)`).
+  **Ojo con la 0018**: en la tabla de migraciones de Supabase quedó
+  registrada con el nombre `0005_vital_signs_auditoria` (se aplicó desde
+  otra conversación que trabajaba sobre una copia local desactualizada). El
+  esquema quedó correcto; el archivo del repo es el `0018` bien numerado y
+  es idempotente (`add column if not exists`), así que reaplicarlo no rompe
+  nada — es solo una inconsistencia cosmética de nombre entre la DB y el repo.
   Plan gratuito — "Leaked password protection" NO se puede activar
   (requiere Pro); el mínimo de contraseña se subió a 8 caracteres en Auth
   (2026-07-16). PostgreSQL 17. Bucket privado de Storage `adjuntos` (10MB
@@ -710,6 +719,46 @@ escritura contra producción fue la migración `0017` (aditiva), verificada
 primero en transacción con rollback (miembro puede insertar/ver un uso,
 usuario de otro household recibe "row violates row-level security policy").
 
+## Cuarta auditoría — Signos Vitales (completada 2026-07-17)
+
+Auditoría relevada por la usuaria sobre el módulo de Signos Vitales. **Se
+hizo originalmente en otra conversación** que trabajaba sobre una copia
+local separada; en esta sesión se revisó, se verificó su consistencia con
+el estado actual del repo y se integró. Commit `a9753ff` + migración
+`0018`.
+
+- **Hora de la toma**: campo de hora en el formulario (además de la fecha)
+  y columna "Hora" en el historial.
+- **Edad automática**: antes se cargaba a mano y casi siempre quedaba
+  vacía (hallazgo del E2E de P0). Ahora se calcula sola como los años
+  cumplidos entre la fecha de nacimiento del paciente y la fecha del
+  registro; el campo es de solo lectura y se recalcula al cambiar la fecha.
+- **Peso por edad**: para pacientes **menores de 2 años** (a la fecha del
+  registro) el peso se ingresa en **gramos**; de 2 años en adelante, en
+  **kilogramos**. Internamente siempre se guarda en kg con 3 decimales
+  (por eso `peso` pasó a `numeric(6,3)`); la conversión gramos→kg es
+  automática al guardar. La unidad del input y la del historial cambian
+  según la edad del registro.
+- **Altura / Longitud tibial**: selector de modo de medición de estatura;
+  la longitud tibial (cm) reemplaza a la altura cuando se elige ese modo
+  (mutuamente excluyentes en un mismo registro — pensado para lactantes o
+  casos donde no se puede medir de pie). El historial aclara "(tibial)".
+- **Frecuencia respiratoria**: campo nuevo junto a la frecuencia cardíaca,
+  visible también en el historial ("F.R.").
+
+**Revisión y mejora en esta sesión**: se confirmó por `diff` que la otra
+conversación no tocó nada más de `api.js` (los cambios de las auditorías
+de Medicamentos y Pacientes siguen intactos). Como mejora, la frecuencia
+respiratoria ahora también es **variable graficable** (tarjeta KPI +
+gráfica de evolución), igual que la frecuencia cardíaca — antes solo
+estaba en el formulario y la tabla. Verificado con `npm run build` y
+captura de Playwright del formulario y del historial.
+
+**Pendiente menor a confirmar con la usuaria** (heredado del diseño de la
+otra sesión): si alguna vez se necesita registrar *altura y longitud
+tibial a la vez* en un mismo control, el diseño actual no lo contempla
+(son excluyentes).
+
 ## Historial relevante de sesiones previas (resumen)
 
 1. **P0 #1 y #2 completadas**: variables de entorno en Vercel y
@@ -763,7 +812,12 @@ usuario de otro household recibe "row violates row-level security policy").
     activos (controlados/horario/demanda) con grupo colapsable de
     inactivos, y unificación Órdenes→Medicamento al marcar entregado. Ver
     sección dedicada arriba.
-15. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
+15. **Cuarta auditoría — Signos Vitales: COMPLETADA** el 2026-07-17
+    (commit `a9753ff` + migración `0018`, hecha originalmente en otra
+    conversación y revisada/integrada acá): hora de toma, edad automática,
+    peso gramos/kg por edad, altura/longitud tibial, y frecuencia
+    respiratoria (además graficable). Ver sección dedicada arriba.
+16. **Pieza A de arquitectura diseñada a alto nivel (sin implementar)**:
     directorio público auditado de médicos y centros.
 
 ## Criterio de asignación de agentes de Claude
