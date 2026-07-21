@@ -1,7 +1,7 @@
 import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
-import { esc } from '../lib/utils.js';
+import { esc, safeUrl } from '../lib/utils.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 
 export async function render() {
@@ -60,7 +60,7 @@ export async function render() {
       ${c.tel1 ? `<div class="dir-row"><a href="tel:${esc(c.tel1)}">${esc(c.tel1)}</a>${c.tel2 ? ` · <a href="tel:${esc(c.tel2)}">${esc(c.tel2)}</a>` : ''}</div>` : ''}
       ${c.dir ? `<div class="dir-row">${esc(c.dir)}</div>` : ''}
       ${c.email ? `<div class="dir-row"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
-      ${c.web ? `<div class="dir-row"><a href="${esc(c.web)}" target="_blank" rel="noopener">${esc(c.web)}</a></div>` : ''}
+      ${c.web && safeUrl(c.web) ? `<div class="dir-row"><a href="${esc(safeUrl(c.web))}" target="_blank" rel="noopener noreferrer">${esc(c.web)}</a></div>` : ''}
     </div>`).join('')}
   </div>`;
 

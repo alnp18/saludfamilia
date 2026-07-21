@@ -5,11 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>SaludFamilia</title>
 <link rel="stylesheet" href="/src/styles.css"/>
-<script>
-  // Se captura ANTES de que cargue el bundle (y por lo tanto antes de que
-  // supabase-js procese y limpie el hash del enlace de recuperación).
-  window.__recoveryInUrl = (location.hash || '').indexOf('type=recovery') !== -1;
-</script>
+<script src="/recovery-flag.js"></script>
 </head>
 <body>
 

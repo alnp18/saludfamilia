@@ -280,7 +280,7 @@ async function renderMedsHistory() {
             <span><strong style="color:var(--tp)">${esc(m.dosis || '—')} ${esc(m.unidad || '')}</strong></span>
             <span>${esc(m.frecuencia || '—')}</span>
             ${m.via ? `<span>${esc(m.via)}</span>` : ''}
-            ${(m.horarios || []).filter(h => h?.hora).length ? `<span>${m.horarios.filter(h => h?.hora).map(h => h.dosis ? `${h.hora} (${h.dosis})` : h.hora).join(' · ')}</span>` : ''}
+            ${(m.horarios || []).filter(h => h?.hora).length ? `<span>${m.horarios.filter(h => h?.hora).map(h => h.dosis ? `${esc(h.hora)} (${esc(h.dosis)})` : esc(h.hora)).join(' · ')}</span>` : ''}
           </div>
           ${m.observaciones ? `<div style="margin-top:5px;font-size:11.5px;color:var(--tm)">${esc(m.observaciones)}</div>` : ''}
           ${m.motivoCambio ? `<div style="margin-top:4px;font-size:11px;color:var(--amber)">↳ Motivo: ${esc(m.motivoCambio)}</div>` : ''}
