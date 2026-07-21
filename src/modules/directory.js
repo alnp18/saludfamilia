@@ -1,7 +1,7 @@
 import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
-import { esc } from '../lib/utils.js';
+import { esc, safeUrl } from '../lib/utils.js';
 import { Icons } from '../lib/icons.js';
 import { SPECIALTIES } from './doctors.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
@@ -189,7 +189,7 @@ function renderCentersTab(el, pubCenters, myCenters) {
       ${c.tel1 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel1)}${c.tel2 ? ' · ' + esc(c.tel2) : ''}</span></div>` : ''}
       ${c.dir ? `<div class="dir-row">${Icons.hospital}<span>${esc(c.dir)}</span></div>` : ''}
       ${c.email ? `<div class="dir-row">${Icons.mail}<span>${esc(c.email)}</span></div>` : ''}
-      ${c.web ? `<div class="dir-row">${Icons.globe}<a href="${esc(c.web)}" target="_blank" rel="noopener">${esc(c.web)}</a></div>` : ''}
+      ${c.web && safeUrl(c.web) ? `<div class="dir-row">${Icons.globe}<a href="${esc(safeUrl(c.web))}" target="_blank" rel="noopener noreferrer">${esc(c.web)}</a></div>` : ''}
     </div>`).join('')}
   </div>`;
 

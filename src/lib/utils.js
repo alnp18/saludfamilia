@@ -3,6 +3,18 @@ export function esc(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+/** Devuelve la URL solo si es http(s); si no, cadena vacía.
+ *  Bloquea esquemas peligrosos (javascript:, data:, vbscript:, …). */
+export function safeUrl(u) {
+  const s = String(u ?? '').trim();
+  try {
+    const parsed = new URL(s, window.location.origin);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') ? s : '';
+  } catch {
+    return '';
+  }
+}
+
 export function initials(name) {
   return (name || '?').trim().split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
