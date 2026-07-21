@@ -386,7 +386,7 @@ async function openVitalModal(id) {
       </div>
       <div class="vital-form-section" style="margin-bottom:0">
         <div class="vital-form-section-title">Notas</div>
-        <div class="form-field"><textarea class="fi" id="vf-notas" rows="2" placeholder="Observaciones del médico, condiciones especiales…">${r?.notas || ''}</textarea></div>
+        <div class="form-field"><textarea class="fi" id="vf-notas" rows="2" placeholder="Observaciones del médico, condiciones especiales…">${esc(r?.notas || '')}</textarea></div>
       </div>
     </div>`,
     [
