@@ -366,6 +366,7 @@ async function readImportFile() {
     progress.textContent = 'Descifrando…';
     const envelope = await xport.readEnvelopeFile(file);
     payload = await xport.decryptEnvelope(envelope, pw);
+    xport.validatePayload(payload); // rechaza un archivo malformado antes de confirmar
   } catch (err) {
     progress.textContent = '';
     showToast(err.message || 'No se pudo leer el archivo', 'err');
