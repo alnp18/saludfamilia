@@ -181,110 +181,214 @@ export function summarizePayload(payload) {
 }
 
 // ─────────────────────────────────────────
+// Validación del payload (antes de escribir nada)
+// ─────────────────────────────────────────
+const COLLECTION_KEYS = ['patients', 'doctors', 'centers', 'orders', 'meds', 'vitals'];
+
+function isPlainObject(v) {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Valida la FORMA del payload descifrado ANTES de escribir nada en la base.
+ * Un archivo .sfam corrupto o manipulado se rechaza acá, así no deja datos a
+ * medias ni intenta insertar basura. No valida cada campo de texto (el render
+ * ya escapa con esc()), sino la estructura: que las colecciones sean arrays de
+ * objetos y que los ids sean primitivos. Lanza Error con mensaje claro si algo
+ * no cuadra; devuelve true si el payload es válido.
+ */
+export function validatePayload(payload) {
+  if (!isPlainObject(payload)) {
+    throw new Error('El archivo no contiene datos válidos de SaludFamilia.');
+  }
+  for (const key of COLLECTION_KEYS) {
+    const coll = payload[key];
+    if (coll === undefined || coll === null) continue; // opcional → se trata como []
+    if (!Array.isArray(coll)) {
+      throw new Error(`El archivo está dañado: "${key}" debería ser una lista.`);
+    }
+    for (const item of coll) {
+      if (!isPlainObject(item)) {
+        throw new Error(`El archivo está dañado: hay un elemento inválido en "${key}".`);
+      }
+      const t = typeof item.id;
+      if (item.id !== undefined && t !== 'string' && t !== 'number') {
+        throw new Error(`El archivo está dañado: un elemento de "${key}" tiene un id inválido.`);
+      }
+    }
+  }
+  return true;
+}
+
+// ─────────────────────────────────────────
 // Importar (escribe vía API → RLS del household destino)
 // ─────────────────────────────────────────
+const DELETE_BY_TYPE = {
+  center: api.deleteCenter,
+  doctor: api.deleteDoctor,
+  patient: api.deletePatient,
+  order: api.deleteOrder,
+  med: api.deleteMed,
+  vital: api.deleteVital,
+};
+
+/**
+ * Revierte lo creado por un import fallido. Borra en orden INVERSO al de
+ * creación (hijos antes que padres, respetando las FK). Es best-effort: si un
+ * borrado falla, sigue con el resto y devuelve false para avisar que la
+ * reversión quedó incompleta.
+ */
+async function rollbackImport(created, onProgress = () => {}) {
+  let allOk = true;
+  onProgress('Revirtiendo lo importado…');
+  for (let i = created.length - 1; i >= 0; i--) {
+    const { type, id } = created[i];
+    const del = DELETE_BY_TYPE[type];
+    if (!del) { allOk = false; continue; }
+    try {
+      await del(id);
+    } catch {
+      allOk = false; // seguimos borrando el resto igual
+    }
+  }
+  return allOk;
+}
+
 /**
  * Crea todo el contenido del payload dentro del household destino, con IDs
  * nuevos y referencias remapeadas. Orden: centros → médicos → pacientes →
  * órdenes → medicamentos (padres antes que hijos) → signos vitales.
  * `onProgress(texto)` es opcional, para feedback en la UI.
+ *
+ * Antes de escribir valida la forma del payload (validatePayload). Si algo
+ * falla a mitad del proceso, revierte automáticamente todo lo ya creado, de
+ * modo que el import es "todo o nada" desde el punto de vista de la familia
+ * destino (recuperable, sin dejar datos parciales).
  */
 export async function importPayload(payload, householdId, onProgress = () => {}) {
+  validatePayload(payload);
+
   const centerMap = new Map();
   const doctorMap = new Map();
   const patientMap = new Map();
   const medMap = new Map();
 
-  onProgress('Importando centros médicos…');
-  for (const c of payload.centers || []) {
-    // publicSourceId (procedencia del directorio público, pieza A) no viaja
-    // entre familias: en el archivo puede venir un id que ya no exista en el
-    // directorio (la FK rechazaría el insert) y es metadato local, no dato
-    // clínico. Se quita la CLAVE (no basta ponerla en undefined: la capa de
-    // api solo escribe la columna si la clave está presente).
-    const { publicSourceId: _omitC, ...cRest } = c;
-    const saved = await api.saveCenter({ ...cRest, id: undefined }, householdId);
-    centerMap.set(c.id, saved.id);
-  }
+  // Registro de lo creado, en orden, para poder revertir si algo falla.
+  const created = [];
+  const track = (type, id) => created.push({ type, id });
 
-  onProgress('Importando médicos…');
-  for (const d of payload.doctors || []) {
-    const { publicSourceId: _omitD, ...dRest } = d;
-    const saved = await api.saveDoctor({
-      ...dRest, id: undefined,
-      centroId: d.centroId ? centerMap.get(d.centroId) || null : null,
-    }, householdId);
-    doctorMap.set(d.id, saved.id);
-  }
+  try {
+    onProgress('Importando centros médicos…');
+    for (const c of payload.centers || []) {
+      // publicSourceId (procedencia del directorio público, pieza A) no viaja
+      // entre familias: en el archivo puede venir un id que ya no exista en el
+      // directorio (la FK rechazaría el insert) y es metadato local, no dato
+      // clínico. Se quita la CLAVE (no basta ponerla en undefined: la capa de
+      // api solo escribe la columna si la clave está presente).
+      const { publicSourceId: _omitC, ...cRest } = c;
+      const saved = await api.saveCenter({ ...cRest, id: undefined }, householdId);
+      track('center', saved.id);
+      centerMap.set(c.id, saved.id);
+    }
 
-  onProgress('Importando pacientes…');
-  for (const p of payload.patients || []) {
-    const saved = await api.savePatient({ ...p, id: undefined }, householdId);
-    patientMap.set(p.id, saved.id);
-  }
+    onProgress('Importando médicos…');
+    for (const d of payload.doctors || []) {
+      const { publicSourceId: _omitD, ...dRest } = d;
+      const saved = await api.saveDoctor({
+        ...dRest, id: undefined,
+        centroId: d.centroId ? centerMap.get(d.centroId) || null : null,
+      }, householdId);
+      track('doctor', saved.id);
+      doctorMap.set(d.id, saved.id);
+    }
 
-  onProgress('Importando órdenes médicas…');
-  // Los adjuntos vienen embebidos en el archivo (base64); acá se suben al
-  // Storage del household destino. Vale también para archivos exportados
-  // antes de la migración a Storage: importan igual y quedan en el bucket.
-  const SLOT_BY_FIELD = { orden_archivo: 'orden', solicitud_imagen: 'solicitud', auth_imagen: 'autorizacion' };
-  for (const o of payload.orders || []) {
-    const patientId = patientMap.get(o.patientId);
-    if (!patientId) continue; // orden de un paciente no incluido: no debería pasar
-    const base = {
-      ...o, id: undefined,
-      medicoId: o.medicoId ? doctorMap.get(o.medicoId) || null : null,
-      medicoId_cita: o.medicoId_cita ? doctorMap.get(o.medicoId_cita) || null : null,
-      auth_centroId: o.auth_centroId ? centerMap.get(o.auth_centroId) || null : null,
-      orden_archivo: null, solicitud_imagen: null, auth_imagen: null,
-    };
-    const saved = await api.saveOrder(base, householdId, patientId);
-    let hasFiles = false;
-    for (const [field, slot] of Object.entries(SLOT_BY_FIELD)) {
-      const att = o[field];
-      if (att && att.data) {
-        base[field] = await files.uploadAttachment(householdId, saved.id, slot, att);
-        hasFiles = true;
+    onProgress('Importando pacientes…');
+    for (const p of payload.patients || []) {
+      const saved = await api.savePatient({ ...p, id: undefined }, householdId);
+      track('patient', saved.id);
+      patientMap.set(p.id, saved.id);
+    }
+
+    onProgress('Importando órdenes médicas…');
+    // Los adjuntos vienen embebidos en el archivo (base64); acá se suben al
+    // Storage del household destino. Vale también para archivos exportados
+    // antes de la migración a Storage: importan igual y quedan en el bucket.
+    const SLOT_BY_FIELD = { orden_archivo: 'orden', solicitud_imagen: 'solicitud', auth_imagen: 'autorizacion' };
+    for (const o of payload.orders || []) {
+      const patientId = patientMap.get(o.patientId);
+      if (!patientId) continue; // orden de un paciente no incluido: no debería pasar
+      const base = {
+        ...o, id: undefined,
+        medicoId: o.medicoId ? doctorMap.get(o.medicoId) || null : null,
+        medicoId_cita: o.medicoId_cita ? doctorMap.get(o.medicoId_cita) || null : null,
+        auth_centroId: o.auth_centroId ? centerMap.get(o.auth_centroId) || null : null,
+        orden_archivo: null, solicitud_imagen: null, auth_imagen: null,
+      };
+      const saved = await api.saveOrder(base, householdId, patientId);
+      track('order', saved.id);
+      let hasFiles = false;
+      for (const [field, slot] of Object.entries(SLOT_BY_FIELD)) {
+        const att = o[field];
+        if (att && att.data) {
+          base[field] = await files.uploadAttachment(householdId, saved.id, slot, att);
+          hasFiles = true;
+        }
+      }
+      if (hasFiles) {
+        base.id = saved.id;
+        await api.saveOrder(base, householdId, patientId);
       }
     }
-    if (hasFiles) {
-      base.id = saved.id;
-      await api.saveOrder(base, householdId, patientId);
-    }
-  }
 
-  onProgress('Importando medicamentos…');
-  // Las versiones encadenan medicamento_padre_id: insertar padres antes que
-  // hijos, en pasadas sucesivas. Si quedara una referencia irresoluble (no
-  // debería), se importa sin el vínculo en vez de perder el medicamento.
-  let pending = (payload.meds || []).slice();
-  while (pending.length) {
-    const ready = pending.filter(m =>
-      !m.medicamentoPadreId || medMap.has(m.medicamentoPadreId));
-    const batch = ready.length ? ready : pending.map(m => ({ ...m, medicamentoPadreId: null }));
-    for (const m of batch) {
-      const patientId = patientMap.get(m.patientId);
+    onProgress('Importando medicamentos…');
+    // Las versiones encadenan medicamento_padre_id: insertar padres antes que
+    // hijos, en pasadas sucesivas. Si quedara una referencia irresoluble (no
+    // debería), se importa sin el vínculo en vez de perder el medicamento.
+    let pending = (payload.meds || []).slice();
+    while (pending.length) {
+      const ready = pending.filter(m =>
+        !m.medicamentoPadreId || medMap.has(m.medicamentoPadreId));
+      const batch = ready.length ? ready : pending.map(m => ({ ...m, medicamentoPadreId: null }));
+      for (const m of batch) {
+        const patientId = patientMap.get(m.patientId);
+        if (!patientId) continue;
+        const saved = await api.insertMed({
+          ...m, id: undefined,
+          medicamentoPadreId: m.medicamentoPadreId
+            ? medMap.get(m.medicamentoPadreId) || null : null,
+        }, householdId, patientId);
+        track('med', saved.id);
+        medMap.set(m.id, saved.id);
+      }
+      pending = ready.length
+        ? pending.filter(m => !ready.includes(m))
+        : [];
+    }
+
+    onProgress('Importando signos vitales…');
+    for (const v of payload.vitals || []) {
+      const patientId = patientMap.get(v.patientId);
       if (!patientId) continue;
-      const saved = await api.insertMed({
-        ...m, id: undefined,
-        medicamentoPadreId: m.medicamentoPadreId
-          ? medMap.get(m.medicamentoPadreId) || null : null,
-      }, householdId, patientId);
-      medMap.set(m.id, saved.id);
+      const saved = await api.saveVital({ ...v, id: undefined }, householdId, patientId);
+      track('vital', saved.id);
     }
-    pending = ready.length
-      ? pending.filter(m => !ready.includes(m))
-      : [];
-  }
 
-  onProgress('Importando signos vitales…');
-  for (const v of payload.vitals || []) {
-    const patientId = patientMap.get(v.patientId);
-    if (!patientId) continue;
-    await api.saveVital({ ...v, id: undefined }, householdId, patientId);
+    return summarizePayload(payload);
+  } catch (err) {
+    // Algo falló a mitad del import: revertir todo lo ya creado para no dejar
+    // la familia destino con datos parciales.
+    const rollbackOk = await rollbackImport(created, onProgress);
+    if (!rollbackOk) {
+      throw new Error(
+        'La importación falló y no se pudo revertir todo automáticamente. ' +
+        'Revisá los módulos: puede haber quedado contenido parcial.'
+      );
+    }
+    throw new Error(
+      'La importación falló y se revirtió por completo: no quedó nada a medias.' +
+      (err && err.message ? ` (${err.message})` : '')
+    );
   }
-
-  return summarizePayload(payload);
 }
 
 // ─────────────────────────────────────────
