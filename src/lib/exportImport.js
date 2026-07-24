@@ -234,11 +234,11 @@ const DELETE_BY_TYPE = {
 
 /**
  * Revierte lo creado por un import fallido. Borra en orden INVERSO al de
- * creación (hijos antes que padres, respetando las FK). Es best-effort: si un
- * borrado falla, sigue con el resto y devuelve false para avisar que la
- * reversión quedó incompleta.
+ * creación (hijos antes que padres, respetando las FK) y limpia de Storage los
+ * adjuntos que ya se habían subido. Es best-effort: si un borrado falla, sigue
+ * con el resto y devuelve false para avisar que la reversión quedó incompleta.
  */
-async function rollbackImport(created, onProgress = () => {}) {
+async function rollbackImport(created, uploadedPaths = [], onProgress = () => {}) {
   let allOk = true;
   onProgress('Revirtiendo lo importado…');
   for (let i = created.length - 1; i >= 0; i--) {
@@ -251,6 +251,10 @@ async function rollbackImport(created, onProgress = () => {}) {
       allOk = false; // seguimos borrando el resto igual
     }
   }
+  // Adjuntos ya subidos al bucket: se borran para no dejar objetos huérfanos.
+  // removeAttachments es best-effort y no lanza (un huérfano es inaccesible
+  // para otras familias igualmente), así que no afecta a allOk.
+  if (uploadedPaths.length) await files.removeAttachments(uploadedPaths);
   return allOk;
 }
 
@@ -276,6 +280,8 @@ export async function importPayload(payload, householdId, onProgress = () => {})
   // Registro de lo creado, en orden, para poder revertir si algo falla.
   const created = [];
   const track = (type, id) => created.push({ type, id });
+  // Rutas de adjuntos subidos al Storage, para limpiarlas si hay que revertir.
+  const uploadedPaths = [];
 
   try {
     onProgress('Importando centros médicos…');
@@ -330,7 +336,9 @@ export async function importPayload(payload, householdId, onProgress = () => {})
       for (const [field, slot] of Object.entries(SLOT_BY_FIELD)) {
         const att = o[field];
         if (att && att.data) {
-          base[field] = await files.uploadAttachment(householdId, saved.id, slot, att);
+          const uploaded = await files.uploadAttachment(householdId, saved.id, slot, att);
+          if (uploaded && uploaded.path) uploadedPaths.push(uploaded.path);
+          base[field] = uploaded;
           hasFiles = true;
         }
       }
@@ -377,7 +385,7 @@ export async function importPayload(payload, householdId, onProgress = () => {})
   } catch (err) {
     // Algo falló a mitad del import: revertir todo lo ya creado para no dejar
     // la familia destino con datos parciales.
-    const rollbackOk = await rollbackImport(created, onProgress);
+    const rollbackOk = await rollbackImport(created, uploadedPaths, onProgress);
     if (!rollbackOk) {
       throw new Error(
         'La importación falló y no se pudo revertir todo automáticamente. ' +
