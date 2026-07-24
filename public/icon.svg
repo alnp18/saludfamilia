@@ -1,0 +1,22 @@
+<svg viewBox="0 0 192 192" xmlns="http://www.w3.org/2000/svg">
+  <!-- Fondo circular gradiente -->
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#10b981;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#059669;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  <circle cx="96" cy="96" r="96" fill="url(#grad1)"/>
+  
+  <!-- Logo interior: línea de pulso + corazón estilizado -->
+  <g transform="translate(96, 96)">
+    <!-- Pulso (heartbeat line) -->
+    <polyline points="-50,-10 -30,-10 -20,10 -10,-30 0,-10 20,-10" 
+              fill="none" stroke="white" stroke-width="3.5" 
+              stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Línea horizontal base -->
+    <line x1="-50" y1="-10" x2="50" y2="-10" 
+          stroke="white" stroke-width="1.5" opacity="0.6"/>
+  </g>
+</svg>
