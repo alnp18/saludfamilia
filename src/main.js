@@ -2,6 +2,7 @@ import * as auth from './lib/auth.js';
 import * as api from './lib/api.js';
 import { state, restoreActivePatientId, persistActivePatientId, restoreLightMode, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
 import { initModalOverlay, showToast } from './lib/modal.js';
+import { entregarAvisosPendientes } from './lib/reminders.js';
 import { initCallButtons } from './lib/phone.js';
 import { wireHeader, closePatientDrop, closeMobileNav } from './modules/header.js';
 import { showLegalModal } from './lib/legal.js';
@@ -121,6 +122,23 @@ async function bootstrapApp() {
   updateNoPatientBanner();
 
   goView('dashboard');
+
+  // Recordatorios de seguimiento (Fase 3). Va al final y sin `await`: es
+  // información de apoyo, no puede demorar el arranque, y si falla no debe
+  // impedir usar la app.
+  revisarRecordatorios();
+}
+
+/**
+ * Revisa si hay recordatorios de seguimiento vencidos y los entrega. Los
+ * errores se tragan a propósito: es una comodidad, no una función crítica, y
+ * un fallo acá no puede traducirse en un mensaje de error al abrir la app.
+ */
+async function revisarRecordatorios() {
+  try {
+    const orders = await api.listOrdersByHousehold(state.household.id);
+    await entregarAvisosPendientes(orders);
+  } catch { /* sin recordatorios; se reintenta en el próximo arranque */ }
 }
 
 // ─────────────────────────────────────────

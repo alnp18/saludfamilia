@@ -224,6 +224,64 @@ export async function listPatientDiagnoses(patientId) {
   return data.map(rowToDiagnosis);
 }
 
+// ─────────────────────────────────────────
+// ORDER REMINDERS ("¿Recordarme cada 3 días?" — Fase 3)
+// ─────────────────────────────────────────
+function rowToReminder(r) {
+  return {
+    id: r.id,
+    orderId: r.order_id,
+    cadaDias: r.cada_dias,
+    proximoAviso: r.proximo_aviso,
+    ultimoAviso: r.ultimo_aviso,
+    activo: r.activo,
+  };
+}
+
+export async function listOrderReminders(householdId) {
+  const { data, error } = await supabase.from('order_reminders').select('*')
+    .eq('household_id', householdId).eq('activo', true);
+  if (error) throw error;
+  return data.map(rowToReminder);
+}
+
+export async function getOrderReminder(orderId) {
+  const { data, error } = await supabase.from('order_reminders').select('*')
+    .eq('order_id', orderId).maybeSingle();
+  if (error) throw error;
+  return data ? rowToReminder(data) : null;
+}
+
+/** Crea o actualiza el recordatorio de una orden (uno por orden). */
+export async function saveOrderReminder({ orderId, cadaDias, proximoAviso }, householdId) {
+  const { data, error } = await supabase.from('order_reminders')
+    .upsert({
+      household_id: householdId,
+      order_id: orderId,
+      cada_dias: cadaDias,
+      proximo_aviso: proximoAviso,
+      activo: true,
+    }, { onConflict: 'order_id' })
+    .select().single();
+  if (error) throw error;
+  return rowToReminder(data);
+}
+
+/** Deja constancia de un aviso entregado y agenda el siguiente. */
+export async function marcarAvisoEntregado(id, proximoAviso) {
+  const { error } = await supabase.from('order_reminders')
+    .update({ ultimo_aviso: new Date().toISOString(), proximo_aviso: proximoAviso })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+/** Apaga el recordatorio (llegó la autorización, o se desactivó a mano). */
+export async function desactivarOrderReminder(orderId) {
+  const { error } = await supabase.from('order_reminders')
+    .update({ activo: false }).eq('order_id', orderId);
+  if (error) throw error;
+}
+
 /** Todos los diagnósticos del household — ver listHouseholdPolicies. */
 export async function listHouseholdDiagnoses(householdId) {
   const { data, error } = await supabase.from('patient_diagnoses').select('*')
@@ -613,6 +671,15 @@ export async function listOrdersByPatient(patientId) {
   if (error) throw error;
   return data.map(rowToOrder);
 }
+/** Órdenes de todo el household — lo usan los recordatorios, que no dependen
+ *  de qué paciente esté activo en este momento. */
+export async function listOrdersByHousehold(householdId) {
+  const { data, error } = await supabase.from('medical_orders_with_stage').select('*')
+    .eq('household_id', householdId);
+  if (error) throw error;
+  return data.map(rowToOrder);
+}
+
 export async function getOrder(id) {
   const { data, error } = await supabase.from('medical_orders_with_stage').select('*').eq('id', id).single();
   if (error) throw error;

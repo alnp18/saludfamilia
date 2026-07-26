@@ -9,6 +9,7 @@ import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor, copiarMedicoPublico } from '../lib/inlineDirectory.js';
 import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch, readLiveSearch } from '../lib/liveSearch.js';
 import { buscarMedicos } from '../lib/searches.js';
+import { INTERVALOS, permisoNotificaciones, activarRecordatorio, desactivarRecordatorio, ETAPAS_RESUELTAS as ETAPAS_SIN_RECORDATORIO } from '../lib/reminders.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
@@ -626,6 +627,84 @@ function refrescarAvisoSolicitud() {
     ?.classList.toggle('hidden', solicitudEstaRegistrada());
 }
 
+/**
+ * Bloque "¿Recordarme cada 3 días?" de la etapa B — Fase 3.
+ *
+ * Solo aparece al editar una orden ya creada: el recordatorio se guarda
+ * contra el id de la orden, que en una orden nueva todavía no existe.
+ */
+function recordatorioFieldHtml() {
+  return `
+    <div class="form-field span2" id="of-recordatorio-wrap" style="margin-bottom:14px">
+      <label class="ck-row"><input type="checkbox" id="of-recordar"/> <span>Recordarme hacer seguimiento hasta que llegue la autorización</span></label>
+      <div class="hidden" id="of-recordar-opts" style="margin-top:8px">
+        <select class="fi" id="of-recordar-cada">
+          ${INTERVALOS.map(i => `<option value="${i.dias}" ${i.dias === 3 ? 'selected' : ''}>${i.label}</option>`).join('')}
+        </select>
+        <p style="font-size:11.5px;color:var(--tm);margin:6px 0 0" id="of-recordar-nota"></p>
+      </div>
+    </div>`;
+}
+
+/**
+ * Conecta el recordatorio: carga el estado guardado y aplica los cambios al
+ * momento (no al guardar la orden), porque activar un recordatorio y que no
+ * pase nada visible hasta apretar "Guardar cambios" se siente roto.
+ */
+async function wireRecordatorio(orderId) {
+  const check = document.getElementById('of-recordar');
+  if (!check || !orderId) return;
+  const opts = document.getElementById('of-recordar-opts');
+  const cada = document.getElementById('of-recordar-cada');
+  const nota = document.getElementById('of-recordar-nota');
+
+  const pintarNota = () => {
+    const permiso = permisoNotificaciones();
+    nota.textContent = permiso === 'granted'
+      ? 'Te avisaremos con una notificación y verás el aviso al abrir la app.'
+      : permiso === 'denied'
+        ? 'Las notificaciones están bloqueadas en este navegador: el aviso aparecerá dentro de la app. Puedes desbloquearlas desde la configuración del sitio.'
+        : 'Se te pedirá permiso para enviarte notificaciones. Si no lo das, el aviso aparecerá dentro de la app.';
+  };
+
+  try {
+    const actual = await api.getOrderReminder(orderId);
+    if (actual?.activo) {
+      check.checked = true;
+      opts.classList.remove('hidden');
+      cada.value = String(actual.cadaDias);
+    }
+  } catch { /* si no se puede leer, queda apagado; activarlo lo reescribe */ }
+  pintarNota();
+
+  const aplicar = async () => {
+    if (!check.checked) {
+      try {
+        await desactivarRecordatorio(orderId);
+        showToast('Recordatorio desactivado', 'warn');
+      } catch (err) { showToast(err.message || 'No se pudo desactivar el recordatorio', 'err'); }
+      return;
+    }
+    try {
+      const { notificaciones } = await activarRecordatorio(orderId, cada.value);
+      pintarNota();
+      showToast(notificaciones
+        ? 'Recordatorio activado'
+        : 'Recordatorio activado (verás el aviso al abrir la app)');
+    } catch (err) {
+      check.checked = false;
+      opts.classList.add('hidden');
+      showToast(err.message || 'No se pudo activar el recordatorio', 'err');
+    }
+  };
+
+  check.addEventListener('change', () => {
+    opts.classList.toggle('hidden', !check.checked);
+    aplicar();
+  });
+  cada.addEventListener('change', () => { if (check.checked) aplicar(); });
+}
+
 /** Cómo se lee un médico en el campo: nombre y, si se sabe, especialidad. */
 function etiquetaMedico(d) {
   return d?.nombre ? d.nombre + (d.especialidad ? ' — ' + d.especialidad : '') : '';
@@ -746,6 +825,7 @@ async function openOrderWizard(id, prefill, forceTab) {
     <div class="wiz-pane ${startTab === 'b' ? 'visible' : ''}" id="pane-b">
       ${avisoSolicitudHtml()}
       <div class="info-box" style="margin-bottom:16px">Registra aquí cuando envíes la orden a la aseguradora para solicitar autorización.</div>
+      ${id ? recordatorioFieldHtml() : ''}
       <div class="form-row cols-2">
         <div class="form-field"><label class="fl">Fecha de solicitud</label><input class="fi" id="of-sol-fecha" type="date"/></div>
         <div class="form-field"><label class="fl">Hora</label><input class="fi" id="of-sol-hora" type="time"/></div>
@@ -852,6 +932,7 @@ async function openOrderWizard(id, prefill, forceTab) {
   // Los `value =` de arriba no disparan 'input', así que el aviso de la
   // etapa B se evalúa a mano una vez cargados los datos.
   refrescarAvisoSolicitud();
+  wireRecordatorio(id);
 
   // Pane C (Autorización / Autorizaciones) depende del tipo de orden — se
   // arma aparte y se reconstruye si el usuario cambia el tipo en vivo
@@ -1098,6 +1179,14 @@ async function saveOrderForm(editId) {
       await api.replaceOrderAuthorizations(saved.id, state.household.id, authRows);
     } else if (editId) {
       await api.replaceOrderAuthorizations(saved.id, state.household.id, []);
+    }
+
+    // Si esta edición llevó la orden a Autorización o más allá, el
+    // recordatorio ya cumplió: se apaga acá y no en el próximo arranque,
+    // para que no alcance a sonar una vez de más. Mejor esfuerzo — que
+    // falle no puede tumbar el guardado de la orden.
+    if (ETAPAS_SIN_RECORDATORIO.includes(saved._stage)) {
+      api.desactivarOrderReminder(saved.id).catch(() => {});
     }
 
     closeModal();
