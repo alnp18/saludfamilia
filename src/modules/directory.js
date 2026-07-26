@@ -6,6 +6,7 @@ import { Icons } from '../lib/icons.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 import { SPECIALTIES } from './doctors.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { copiarMedicoPublico } from '../lib/inlineDirectory.js';
 
 /**
  * Directorio público auditado (pieza A de arquitectura).
@@ -359,24 +360,10 @@ function openRejectModal(kind, id) {
 async function copyDoctorToHousehold(pd) {
   if (!pd) return;
   try {
-    // Si el centro (texto) coincide exactamente con un centro privado, se
-    // vincula; si no, el nombre queda visible solo en el directorio público
-    // (el usuario puede crear/vincular su centro después, editando la copia).
-    const centers = await api.listCenters(state.household.id);
-    const match = pd.centro
-      ? centers.find(c => c.nombre.trim().toLowerCase() === pd.centro.trim().toLowerCase())
-      : null;
-    await api.saveDoctor({
-      nombre: pd.nombre,
-      especialidad: pd.especialidad || '',
-      tarjetaProfesional: pd.tarjetaProfesional || '',
-      centroId: match ? match.id : '',
-      consultorio: pd.consultorio || '',
-      tel: pd.tel || '',
-      notas: pd.notas || '',
-      publicSourceId: pd.id,
-    }, state.household.id);
-    showToast(match ? 'Médico copiado (centro vinculado por nombre)' : 'Médico copiado a tu directorio');
+    // La copia en sí vive en inlineDirectory.js, compartida con el buscador
+    // de médico tratante de las órdenes (Fase 3).
+    const { centroVinculado } = await copiarMedicoPublico(pd);
+    showToast(centroVinculado ? 'Médico copiado (centro vinculado por nombre)' : 'Médico copiado a tu directorio');
     render();
   } catch (err) {
     showToast(err.message || 'No se pudo copiar el médico', 'err');

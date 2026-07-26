@@ -6,7 +6,9 @@ import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal
 import { openViewOverlay, closeViewOverlay } from '../lib/viewModeOverlay.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
-import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
+import { wireInlineNewCenter, wireInlineNewDoctor, copiarMedicoPublico } from '../lib/inlineDirectory.js';
+import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch, readLiveSearch } from '../lib/liveSearch.js';
+import { buscarMedicos } from '../lib/searches.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
@@ -624,6 +626,60 @@ function refrescarAvisoSolicitud() {
     ?.classList.toggle('hidden', solicitudEstaRegistrada());
 }
 
+/** Cómo se lee un médico en el campo: nombre y, si se sabe, especialidad. */
+function etiquetaMedico(d) {
+  return d?.nombre ? d.nombre + (d.especialidad ? ' — ' + d.especialidad : '') : '';
+}
+
+/**
+ * Qué hacer con lo elegido en el buscador de médico tratante — Fase 3.
+ *
+ * Son tres casos y solo uno es directo, porque la orden guarda el médico por
+ * clave foránea contra la tabla privada del household:
+ *
+ *  · Médico propio  → el id ya sirve, no hay nada que hacer.
+ *  · Del directorio → hay que copiarlo primero al directorio de la familia y
+ *                     quedarse con el id de ESA copia, no con el público.
+ *  · "Otro"         → no existe en ningún lado: se abre el alta manual con el
+ *                     nombre ya escrito, y el campo queda sin selección hasta
+ *                     que se guarde (si no, la orden apuntaría a un id vacío).
+ */
+async function onSeleccionMedicoTratante(sel, altaMedico) {
+  if (!sel) return;
+
+  if (!sel.id) {
+    fillLiveSearch('of-medico', { label: sel.label });
+    await altaMedico.abrir(sel.label);
+    showToast('Completa los datos del médico para registrarlo', 'warn');
+    return;
+  }
+
+  if (!sel.id.startsWith('pub:')) return;
+
+  try {
+    const { saved, centroVinculado } = await copiarMedicoPublico(sel.item);
+    fillLiveSearch('of-medico', { id: saved.id, label: etiquetaMedico(saved) });
+    // El otro selector de médico (etapa D) es un <select>: se le suma la
+    // opción para que el médico recién copiado también esté disponible ahí.
+    const selCita = document.getElementById('of-cita-medico');
+    if (selCita && !selCita.querySelector(`option[value="${saved.id}"]`)) {
+      const opt = document.createElement('option');
+      opt.value = saved.id;
+      opt.textContent = etiquetaMedico(saved);
+      selCita.appendChild(opt);
+    }
+    showToast(centroVinculado
+      ? 'Médico copiado a tu directorio (centro vinculado por nombre)'
+      : 'Médico copiado a tu directorio');
+  } catch (err) {
+    // Si la copia falla, se limpia la selección: dejar el nombre visible con
+    // un id público guardado haría fallar el guardado de la orden más tarde,
+    // en un punto donde el error ya no se entendería.
+    fillLiveSearch('of-medico', { label: '' });
+    showToast(err.message || 'No se pudo copiar el médico a tu directorio', 'err');
+  }
+}
+
 async function openOrderWizard(id, prefill, forceTab) {
   orderFiles = { orden: null, solicitud: null, autorizacion: null };
   originalStoredPaths = [];
@@ -659,7 +715,6 @@ async function openOrderWizard(id, prefill, forceTab) {
   let startTab = o ? TAB_BY_STAGE[o._stage] : 'a';
   if (o && isAuthTableType(o.tipoOrden) && startTab === 'd') startTab = 'c';
 
-  const docOptions = doctors.map(d => `<option value="${d.id}" ${o?.medicoId === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
   const docOptionsCita = doctors.map(d => `<option value="${d.id}" ${o?.medicoId_cita === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
   const centerOptions = centers.map(c => `<option value="${c.id}" ${o?.auth_centroId === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
 
@@ -673,14 +728,13 @@ async function openOrderWizard(id, prefill, forceTab) {
     <div class="wiz-pane ${startTab === 'a' ? 'visible' : ''}" id="pane-a">
       ${!o || o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
       <div class="form-row cols-2">
-        <div class="form-field">
-          <label class="fl">Médico tratante</label>
-          <div style="display:flex;gap:6px">
-            <select class="fi" id="of-medico" style="flex:1"><option value="">Seleccione médico</option>${docOptions}</select>
-            <button type="button" class="btn btn-sm btn-icon" id="of-medico-add-btn" title="Agregar médico al directorio">+</button>
-          </div>
-          <div id="of-medico-newform" class="hidden"></div>
-        </div>
+        ${liveSearchFieldHtml('of-medico', {
+          label: 'Médico tratante',
+          placeholder: 'Busca por nombre o especialidad…',
+          hint: 'Busca entre tus médicos y en el directorio público. Si no está, escríbelo y lo registras.',
+          accion: { id: 'of-medico-add-btn', title: 'Agregar médico al directorio', label: '+' },
+        })}
+        <div class="form-field"><div id="of-medico-newform" class="hidden"></div></div>
         <div class="form-field"><label class="fl">Fecha de la orden</label><input class="fi" id="of-fecha" type="date"/></div>
         <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccione tipo de orden</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
@@ -739,8 +793,24 @@ async function openOrderWizard(id, prefill, forceTab) {
   wireFileSlot('orden');
   wireFileSlot('solicitud');
 
-  wireInlineNewDoctor({ primarySelectId: 'of-medico', otherSelectIds: ['of-cita-medico'], addBtnId: 'of-medico-add-btn', formContainerId: 'of-medico-newform', specialties: SPECIALTIES });
-  wireInlineNewDoctor({ primarySelectId: 'of-cita-medico', otherSelectIds: ['of-medico'], addBtnId: 'of-cita-medico-add-btn', formContainerId: 'of-cita-medico-newform', specialties: SPECIALTIES });
+  // Médico tratante: buscador en vivo sobre los médicos propios y el
+  // directorio público (Fase 3). El alta manual sigue disponible en el "+",
+  // y es también a donde lleva la opción "Otro" del buscador.
+  const altaMedico = wireInlineNewDoctor({
+    otherSelectIds: ['of-cita-medico'],
+    addBtnId: 'of-medico-add-btn',
+    formContainerId: 'of-medico-newform',
+    specialties: SPECIALTIES,
+    onSaved: (saved) => fillLiveSearch('of-medico', { id: saved.id, label: etiquetaMedico(saved) }),
+  });
+  wireLiveSearch('of-medico', {
+    buscar: buscarMedicos,
+    permitirLibre: true,
+    textoLibre: 'Registrar médico nuevo',
+    onSelect: (sel) => onSeleccionMedicoTratante(sel, altaMedico),
+  });
+
+  wireInlineNewDoctor({ primarySelectId: 'of-cita-medico', otherSelectIds: [], addBtnId: 'of-cita-medico-add-btn', formContainerId: 'of-cita-medico-newform', specialties: SPECIALTIES });
 
   document.getElementById('of-estado').addEventListener('change', (e) => {
     document.getElementById('of-followup-field').classList.toggle('hidden', e.target.value !== 'Finalizado');
@@ -764,10 +834,18 @@ async function openOrderWizard(id, prefill, forceTab) {
     // Set programático: no dispara 'change', así que el toggle de
     // #of-followup-field se replica acá a mano (ver listener más arriba).
     document.getElementById('of-followup-field').classList.toggle('hidden', o.estadoCita !== 'Finalizado');
-    document.getElementById('of-medico').value = o.medicoId || '';
+    fillLiveSearch('of-medico', {
+      id: o.medicoId || '',
+      label: etiquetaMedico(doctors.find(d => d.id === o.medicoId)),
+    });
   } else {
     document.getElementById('of-fecha').value = today();
-    if (prefill?.medicoId) document.getElementById('of-medico').value = prefill.medicoId;
+    if (prefill?.medicoId) {
+      fillLiveSearch('of-medico', {
+        id: prefill.medicoId,
+        label: etiquetaMedico(doctors.find(d => d.id === prefill.medicoId)),
+      });
+    }
     if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
   }
   renderFilePreview('orden'); renderFilePreview('solicitud');
@@ -948,7 +1026,9 @@ async function saveOrderForm(editId) {
 
   const obj = {
     id: editId || undefined,
-    medicoId: document.getElementById('of-medico').value,
+    // Solo el id: si se escribió un nombre libre sin registrarlo, no hay a
+    // quién apuntar y el campo queda vacío en vez de guardar basura.
+    medicoId: readLiveSearch('of-medico').id,
     fechaOrden: document.getElementById('of-fecha').value,
     tipoOrden,
     descripcion: document.getElementById('of-desc').value.trim(),

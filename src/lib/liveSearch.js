@@ -51,17 +51,25 @@ export function closeLiveSearchDropdown() {
  * @param {string} [opts.placeholder]
  * @param {boolean} [opts.span] - ocupar las dos columnas del formulario.
  * @param {string} [opts.hint] - texto de ayuda debajo del campo.
+ * @param {{id: string, label?: string, title?: string}} [opts.accion] - botón
+ *   al lado del campo, alineado con él. Se agregó para el "+" de alta rápida
+ *   del médico tratante (Fase 3): ponerlo por fuera obligaba a anidar un
+ *   `.form-field` dentro de otro y la etiqueta quedaba desalineada.
  */
-export function liveSearchFieldHtml(prefix, { label = 'Buscar', placeholder = 'Escribe para buscar…', span = false, hint = '' } = {}) {
-  return `
-    <div class="form-field${span ? ' span2' : ''}">
-      <label class="fl">${esc(label)}</label>
+export function liveSearchFieldHtml(prefix, { label = 'Buscar', placeholder = 'Escribe para buscar…', span = false, hint = '', accion = null } = {}) {
+  const campo = `
       <div class="ls-field">
         <input class="fi" id="${prefix}-input" type="text" placeholder="${esc(placeholder)}"
                autocomplete="off" role="combobox" aria-expanded="false" aria-autocomplete="list"/>
         <input type="hidden" id="${prefix}-id"/>
         <button type="button" class="ls-clear hidden" id="${prefix}-clear" title="Limpiar" aria-label="Limpiar">×</button>
-      </div>
+      </div>`;
+  return `
+    <div class="form-field${span ? ' span2' : ''}">
+      <label class="fl">${esc(label)}</label>
+      ${accion ? `<div class="ls-row">${campo}
+        <button type="button" class="btn btn-sm btn-icon" id="${esc(accion.id)}" title="${esc(accion.title || '')}">${esc(accion.label || '+')}</button>
+      </div>` : campo}
       ${hint ? `<div class="ls-hint">${esc(hint)}</div>` : ''}
     </div>`;
 }

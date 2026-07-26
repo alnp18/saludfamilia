@@ -328,6 +328,9 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 }
 .ls-clear:hover { color: var(--tp); background: var(--card2); }
 .ls-hint { font-size: 11.5px; color: var(--tm); margin-top: 4px; }
+/* Campo de búsqueda con botón de acción al lado (Fase 3) */
+.ls-row { display: flex; gap: 6px; align-items: stretch; }
+.ls-row .ls-field { flex: 1; min-width: 0; }
 .ls-dropdown {
   position: fixed; z-index: 600; background: var(--card); border: 1px solid var(--border-lt);
   border-radius: var(--r-sm); box-shadow: 0 16px 48px rgba(0,0,0,.55);

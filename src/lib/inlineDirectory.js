@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { esc } from './utils.js';
 import { showToast, openStackedModal, closeStackedModal } from './modal.js';
 import { callInputButtonHtml } from './phone.js';
+import { invalidarCacheMedicos } from './searches.js';
 
 /**
  * Alta rápida de centro médico o médico "sin salir del flujo" (P1.5 —
@@ -23,6 +24,39 @@ import { callInputButtonHtml } from './phone.js';
  * cada botón "Guardar"; un modal encima deja clarísimo qué se está llenando
  * y devuelve el control al de abajo intacto al cerrarse.
  */
+
+/**
+ * Copia una entrada del directorio público al directorio privado de la
+ * familia y devuelve el médico ya creado.
+ *
+ * Hace falta porque las órdenes referencian al médico por clave foránea
+ * contra la tabla privada: elegir a alguien del directorio público no se
+ * puede guardar directamente en una orden, primero hay que tener una copia
+ * propia. Se guarda `publicSourceId` para saber de dónde salió.
+ *
+ * @returns {Promise<{saved: object, centroVinculado: boolean}>}
+ */
+export async function copiarMedicoPublico(pd) {
+  // Si el centro (texto libre en el directorio público) coincide exactamente
+  // con un centro privado, se vincula; si no, la copia queda sin centro y se
+  // puede completar después editándola.
+  const centers = await api.listCenters(state.household.id);
+  const match = pd.centro
+    ? centers.find(c => c.nombre.trim().toLowerCase() === pd.centro.trim().toLowerCase())
+    : null;
+  const saved = await api.saveDoctor({
+    nombre: pd.nombre,
+    especialidad: pd.especialidad || '',
+    tarjetaProfesional: pd.tarjetaProfesional || '',
+    centroId: match ? match.id : '',
+    consultorio: pd.consultorio || '',
+    tel: pd.tel || '',
+    notas: pd.notas || '',
+    publicSourceId: pd.id,
+  }, state.household.id);
+  invalidarCacheMedicos();
+  return { saved, centroVinculado: !!match };
+}
 
 /** Agrega la opción del centro recién creado a un <select> y la selecciona. */
 function inyectarCentroEnSelect(selectId, saved) {
@@ -94,31 +128,36 @@ export function wireInlineNewCenter(selectId, addBtnId) {
 
 /**
  * @param {object} opts
- * @param {string} opts.primarySelectId - <select> que dispara el alta y que
- *   queda con el médico nuevo seleccionado.
+ * @param {string} [opts.primarySelectId] - <select> que queda con el médico
+ *   nuevo seleccionado. Puede omitirse si quien llama maneja el resultado
+ *   por su cuenta con `onSaved` (por ejemplo, un campo de búsqueda en vivo).
  * @param {string[]} [opts.otherSelectIds] - otros <select> de médico en el
  *   mismo formulario que también deben ver la opción nueva (sin cambiar su
  *   valor actual).
  * @param {string} opts.addBtnId
  * @param {string} opts.formContainerId
  * @param {string[]} opts.specialties
+ * @param {(saved: object) => void} [opts.onSaved]
+ * @returns {{abrir: (nombrePrefill?: string) => Promise<void>, cerrar: () => void}}
+ *   `abrir` permite lanzar el alta desde otro control — lo usa el buscador
+ *   de médico tratante cuando se elige "Otro", pasándole lo ya escrito.
  */
-export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addBtnId, formContainerId, specialties }) {
+export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addBtnId, formContainerId, specialties, onSaved }) {
   const addBtn = document.getElementById(addBtnId);
   const container = document.getElementById(formContainerId);
-  if (!addBtn || !container) return;
+  if (!container) return { abrir: async () => {}, cerrar: () => {} };
 
-  addBtn.addEventListener('click', async () => {
-    if (!container.classList.contains('hidden')) {
-      container.classList.add('hidden');
-      container.innerHTML = '';
-      return;
-    }
+  const cerrar = () => {
+    container.classList.add('hidden');
+    container.innerHTML = '';
+  };
+
+  const abrir = async (nombrePrefill = '') => {
     const centers = await api.listCenters(state.household.id);
     container.classList.remove('hidden');
     container.innerHTML = `
       <div class="form-row cols-2" style="margin-top:8px">
-        <div class="form-field span2"><input class="fi" id="${formContainerId}-nombre" type="text" placeholder="Nombre completo del médico *"/></div>
+        <div class="form-field span2"><input class="fi" id="${formContainerId}-nombre" type="text" placeholder="Nombre completo del médico *" value="${esc(nombrePrefill)}"/></div>
         <div class="form-field">
           <select class="fi" id="${formContainerId}-esp">
             <option value="">Seleccione especialidad</option>
@@ -146,10 +185,7 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
     document.getElementById(`${formContainerId}-centro-add`).addEventListener('click', () =>
       openNewCenterModal({ onSaved: (saved) => inyectarCentroEnSelect(`${formContainerId}-centro`, saved) }));
 
-    document.getElementById(`${formContainerId}-cancel`).addEventListener('click', () => {
-      container.classList.add('hidden');
-      container.innerHTML = '';
-    });
+    document.getElementById(`${formContainerId}-cancel`).addEventListener('click', cerrar);
     document.getElementById(`${formContainerId}-save`).addEventListener('click', async () => {
       const nombre = document.getElementById(`${formContainerId}-nombre`).value.trim();
       if (!nombre) { showToast('El nombre del médico es obligatorio', 'err'); return; }
@@ -157,7 +193,7 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
       const centroId = document.getElementById(`${formContainerId}-centro`).value;
       try {
         const saved = await api.saveDoctor({ nombre, especialidad, centroId }, state.household.id);
-        [primarySelectId, ...otherSelectIds].forEach(id => {
+        [primarySelectId, ...otherSelectIds].filter(Boolean).forEach(id => {
           const select = document.getElementById(id);
           if (!select) return;
           const opt = document.createElement('option');
@@ -165,14 +201,25 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
           opt.textContent = saved.nombre + (saved.especialidad ? ' — ' + saved.especialidad : '');
           select.appendChild(opt);
         });
-        const primary = document.getElementById(primarySelectId);
+        const primary = primarySelectId ? document.getElementById(primarySelectId) : null;
         if (primary) primary.value = saved.id;
-        container.classList.add('hidden');
-        container.innerHTML = '';
+        // Los buscadores en vivo consultan la lista de médicos y la cachean
+        // por sesión: sin esto, el que se acaba de crear no aparecería hasta
+        // recargar la página.
+        invalidarCacheMedicos();
+        cerrar();
         showToast('Médico agregado al directorio');
+        onSaved?.(saved);
       } catch (err) {
         showToast(err.message || 'Error al guardar el médico', 'err');
       }
     });
+  };
+
+  addBtn?.addEventListener('click', () => {
+    if (!container.classList.contains('hidden')) { cerrar(); return; }
+    abrir();
   });
+
+  return { abrir, cerrar };
 }
