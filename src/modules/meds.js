@@ -613,7 +613,11 @@ function motivosPrevios(m, eventos) {
   const opciones = [];
   const agregar = (razon) => {
     const texto = (razon || '').trim();
-    if (!texto) return;
+    // El valor del <select> es el propio texto, así que un motivo guardado
+    // que fuera idéntico al centinela de "Por otro motivo…" sería
+    // indistinguible de él. Improbable, pero se descarta y no se pierde
+    // nada: sigue estando en el historial de abajo.
+    if (!texto || texto === OTRA_VALUE) return;
     const clave = normalizar(texto);
     if (vistos.has(clave)) return;
     vistos.add(clave);

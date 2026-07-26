@@ -677,25 +677,38 @@ async function wireRecordatorio(orderId) {
   } catch { /* si no se puede leer, queda apagado; activarlo lo reescribe */ }
   pintarNota();
 
-  const aplicar = async () => {
-    if (!check.checked) {
+  // Activar pide el permiso de notificaciones, que puede quedarse esperando
+  // una respuesta varios segundos. Sin serializar, marcar y desmarcar rápido
+  // deja la casilla apagada y el recordatorio encendido en la base: el
+  // usuario seguiría recibiendo avisos de algo que apagó. La cola garantiza
+  // que la última intención sea la que quede escrita.
+  let enCurso = Promise.resolve();
+  const aplicar = () => {
+    enCurso = enCurso.then(async () => {
+      const quiere = check.checked;
       try {
-        await desactivarRecordatorio(orderId);
-        showToast('Recordatorio desactivado', 'warn');
-      } catch (err) { showToast(err.message || 'No se pudo desactivar el recordatorio', 'err'); }
-      return;
-    }
-    try {
-      const { notificaciones } = await activarRecordatorio(orderId, cada.value);
-      pintarNota();
-      showToast(notificaciones
-        ? 'Recordatorio activado'
-        : 'Recordatorio activado (verás el aviso al abrir la app)');
-    } catch (err) {
-      check.checked = false;
-      opts.classList.add('hidden');
-      showToast(err.message || 'No se pudo activar el recordatorio', 'err');
-    }
+        if (!quiere) {
+          await desactivarRecordatorio(orderId);
+          // Solo se avisa si en el ínterin no volvió a encenderse.
+          if (!check.checked) showToast('Recordatorio desactivado', 'warn');
+          return;
+        }
+        const { notificaciones } = await activarRecordatorio(orderId, cada.value);
+        pintarNota();
+        if (check.checked) {
+          showToast(notificaciones
+            ? 'Recordatorio activado'
+            : 'Recordatorio activado (verás el aviso al abrir la app)');
+        }
+      } catch (err) {
+        if (quiere) {
+          check.checked = false;
+          opts.classList.add('hidden');
+        }
+        showToast(err.message || 'No se pudo cambiar el recordatorio', 'err');
+      }
+    });
+    return enCurso;
   };
 
   check.addEventListener('change', () => {
@@ -728,7 +741,11 @@ async function onSeleccionMedicoTratante(sel, altaMedico) {
 
   if (!sel.id) {
     fillLiveSearch('of-medico', { label: sel.label });
-    await altaMedico.abrir(sel.label);
+    // Si el alta ya estaba abierta, solo se le pasa el nombre: reconstruirla
+    // borraría la especialidad y el centro que ya se hubieran elegido.
+    const yaAbierta = document.getElementById(`${'of-medico-newform'}-nombre`);
+    if (yaAbierta) yaAbierta.value = sel.label;
+    else await altaMedico.abrir(sel.label);
     showToast('Completa los datos del médico para registrarlo', 'warn');
     return;
   }
@@ -813,7 +830,7 @@ async function openOrderWizard(id, prefill, forceTab) {
           hint: 'Busca entre tus médicos y en el directorio público. Si no está, escríbelo y lo registras.',
           accion: { id: 'of-medico-add-btn', title: 'Agregar médico al directorio', label: '+' },
         })}
-        <div class="form-field"><div id="of-medico-newform" class="hidden"></div></div>
+        <div class="form-field span2 hidden" id="of-medico-newform"></div>
         <div class="form-field"><label class="fl">Fecha de la orden</label><input class="fi" id="of-fecha" type="date"/></div>
         <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccione tipo de orden</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
@@ -1146,6 +1163,25 @@ async function saveOrderForm(editId) {
 
   if (!obj.fechaOrden) { showToast('La fecha de la orden es obligatoria', 'err'); switchWizTab('a'); return; }
   if (!obj.tipoOrden) { showToast('Selecciona el tipo de orden', 'err'); switchWizTab('a'); return; }
+
+  // Un nombre escrito a mano que nunca se registró no tiene id: guardar así
+  // dejaría la orden sin médico mientras el campo muestra un nombre, que es
+  // la peor combinación posible. Con el <select> anterior esto no podía
+  // pasar; con un campo de texto sí, y hay que decirlo en vez de perderlo.
+  const medicoEscrito = readLiveSearch('of-medico').texto;
+  if (medicoEscrito && !obj.medicoId) {
+    showToast('Registra al médico con el botón + o elígelo de la lista', 'err');
+    switchWizTab('a');
+    return;
+  }
+  // Copiar un médico del directorio público toma dos consultas; si se guarda
+  // en ese intervalo, el id todavía es el público y la base lo rechazaría
+  // con un error incomprensible.
+  if (obj.medicoId.startsWith('pub:')) {
+    showToast('Espera un momento: se está copiando el médico a tu directorio', 'warn');
+    switchWizTab('a');
+    return;
+  }
 
   try {
     let saved;

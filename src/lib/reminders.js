@@ -152,6 +152,12 @@ export async function entregarAvisosPendientes(orders) {
   if (!vencidos.length) return 0;
 
   const puedeNotificar = permisoNotificaciones() === 'granted';
+  // Se cuenta lo que REALMENTE se mostró, no lo que se intentó. Tener el
+  // permiso concedido no garantiza que la notificación salga: en una PWA de
+  // Android sin service worker registrado, `new Notification()` lanza
+  // "Illegal constructor". Si se diera por entregado lo que falló, el aviso
+  // se consumiría en silencio — justo lo que este módulo quiere evitar.
+  let entregados = 0;
 
   for (const { recordatorio, orden } of vencidos) {
     if (puedeNotificar) {
@@ -166,14 +172,19 @@ export async function entregarAvisosPendientes(orders) {
         };
         if (reg?.showNotification) await reg.showNotification('SaludFamilia — seguimiento', opciones);
         else new Notification('SaludFamilia — seguimiento', opciones);
-      } catch { /* si el aviso no se puede mostrar, queda el de la app */ }
+        entregados++;
+      } catch { /* no se pudo mostrar: cae al aviso dentro de la app */ }
     }
+    // La fecha se corre igual, incluso si la notificación falló: el aviso ya
+    // se dio dentro de la app y, si no se corriera, el mismo recordatorio se
+    // dispararía otra vez en cada carga.
     api.marcarAvisoEntregado(recordatorio.id, proximoAvisoDesdeAhora(recordatorio.cadaDias))
       .catch(() => {});
   }
 
-  if (!puedeNotificar) {
-    showToast(`Tienes ${vencidos.length} orden(es) pendientes de autorización`, 'warn');
+  if (entregados < vencidos.length) {
+    const sinAvisar = vencidos.length - entregados;
+    showToast(`Tienes ${sinAvisar} orden(es) pendientes de autorización`, 'warn');
   }
   return vencidos.length;
 }

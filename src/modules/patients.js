@@ -1038,7 +1038,12 @@ async function renderDiagnosesSection(patientId) {
         onSelect: (sel) => {
           if (!sel) return;
           const codigo = sel.id?.startsWith('cie10:') ? sel.id.slice('cie10:'.length) : '';
-          if (codigo) document.getElementById('pf-diag-codigo').value = codigo;
+          // El código se reescribe SIEMPRE, incluso a vacío. Si solo se
+          // escribiera cuando la opción trae uno, elegir primero "Diabetes"
+          // (E11) y después otra cosa dejaría la descripción nueva con el
+          // código viejo — un diagnóstico crónico mal codificado, que es
+          // exactamente el error que este campo no puede permitirse.
+          document.getElementById('pf-diag-codigo').value = codigo;
           document.getElementById('pf-diag-desc').value = sel.label || '';
         },
       });
@@ -1062,7 +1067,10 @@ async function renderDiagnosesSection(patientId) {
 async function saveDiagnosisInline(patientId) {
   const codigoCie10 = document.getElementById('pf-diag-codigo').value.trim();
   if (!codigoCie10) {
-    showToast('Escribe el código CIE10', 'err'); return;
+    // La columna es obligatoria, así que un diagnóstico sin código no se
+    // puede guardar. El mensaje señala las dos salidas, porque quien llegó
+    // acá desde el buscador puede no saber que también puede escribirlo.
+    showToast('Falta el código CIE10: elígelo del buscador o escríbelo', 'err'); return;
   }
   const descripcion = document.getElementById('pf-diag-desc').value.trim();
   const wasEditing = !!editingDiagnosis;
