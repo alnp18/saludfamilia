@@ -6,6 +6,8 @@ import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/exte
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
+import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch, readLiveSearch } from '../lib/liveSearch.js';
+import { buscarMedicamentos } from '../lib/searches.js';
 
 // Vía de administración: fijas + "Otra…" extensible (ver nota transversal
 // del plan — mismo patrón que Pólizas en Pacientes y Especialidad en
@@ -411,7 +413,12 @@ export async function openMedModal(id, prefill = null) {
     `<div class="form-body">
       ${willVersion ? `<div class="info-box" style="margin-bottom:4px">Si cambias dosis, unidad, frecuencia, vía u horarios se creará automáticamente una nueva versión. El registro anterior queda en el historial.</div>` : ''}
       <div class="form-row cols-2">
-        <div class="form-field span2"><label class="fl">Nombre del medicamento *</label><input class="fi" id="mf-nombre" type="text" placeholder="Ej: Metformina, Enalapril, Aspirina…" value="${esc(m?.nombre || prefill?.nombre || '')}"/></div>
+        ${liveSearchFieldHtml('mf-med', {
+          label: 'Nombre del medicamento *',
+          placeholder: 'Ej: Metformina, Enalapril, Aspirina…',
+          span: true,
+          hint: 'Se buscan los que ya registraste y, con conexión, el registro del INVIMA. Si no aparece, escríbelo y se guarda igual.',
+        })}
         <div class="form-field span2">
           <label class="ck-row"><input type="checkbox" id="mf-controlado" ${m?.controlado ? 'checked' : ''}/> <span>Medicamento controlado</span></label>
         </div>
@@ -433,6 +440,16 @@ export async function openMedModal(id, prefill = null) {
       { label: isEdit ? (willVersion ? 'Guardar nueva versión' : 'Guardar cambios') : 'Agregar medicamento', cls: 'btn btn-primary', action: () => saveMedForm(id) },
     ]
   );
+  wireLiveSearch('mf-med', {
+    buscar: (q) => buscarMedicamentos(q),
+    // Un medicamento que no está en ningún registro debe poder guardarse
+    // igual: hay preparaciones magistrales y productos importados que no
+    // figuran en el INVIMA.
+    permitirLibre: true,
+    textoLibre: 'Registrar',
+  });
+  fillLiveSearch('mf-med', { label: m?.nombre || prefill?.nombre || '' });
+
   wireDateRangeField('mf-vigencia');
   fillDateRangeField('mf-vigencia', m?.fechaInicio || (!m ? today() : ''), m?.fechaFin || '');
 
@@ -454,7 +471,7 @@ export async function openMedModal(id, prefill = null) {
 
 async function saveMedForm(editId) {
   if (!state.activePatient) return;
-  const nombre = document.getElementById('mf-nombre').value.trim();
+  const nombre = readLiveSearch('mf-med').texto;
   const dosis = document.getElementById('mf-dosis').value.trim();
   if (!nombre) { showToast('El nombre es obligatorio', 'err'); return; }
   if (!dosis) { showToast('La dosis diaria es obligatoria', 'err'); return; }

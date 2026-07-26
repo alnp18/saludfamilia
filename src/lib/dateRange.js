@@ -1,4 +1,5 @@
 import { fmtDate, today } from './utils.js';
+import { positionAnchored } from './popover.js';
 
 /**
  * Patrón transversal "Rango de fechas" — auditoría móvil 2026-07-25, Fase 1.
@@ -198,7 +199,7 @@ function openCalendarPopover(prefix, anchor, onChange) {
     });
   }
   render();
-  positionPopover(pop, anchor);
+  positionAnchored(pop, anchor);
 
   // Cierre con Escape; el click afuera NO cierra (mismo criterio que el
   // resto de ventanas flotantes de la app — solo se cierra con un control
@@ -206,19 +207,5 @@ function openCalendarPopover(prefix, anchor, onChange) {
   document.addEventListener('keydown', onEscape);
   function onEscape(e) {
     if (e.key === 'Escape') { closeOpenPopover(); document.removeEventListener('keydown', onEscape); }
-  }
-}
-
-function positionPopover(pop, anchor) {
-  const rect = anchor.getBoundingClientRect();
-  const popWidth = pop.offsetWidth || 560;
-  let left = rect.left;
-  if (left + popWidth > window.innerWidth - 12) left = Math.max(12, window.innerWidth - popWidth - 12);
-  pop.style.left = `${left}px`;
-  pop.style.top = `${rect.bottom + 6}px`;
-  // Si no entra debajo (poco espacio), se muestra arriba del disparador.
-  const popHeight = pop.offsetHeight || 340;
-  if (rect.bottom + popHeight + 6 > window.innerHeight) {
-    pop.style.top = `${Math.max(12, rect.top - popHeight - 6)}px`;
   }
 }

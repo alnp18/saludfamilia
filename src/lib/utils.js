@@ -79,3 +79,19 @@ export function nombreContactoEmergencia(ce) {
   return [ce.primerNombre, ce.segundoNombre, ce.primerApellido, ce.segundoApellido]
     .filter(Boolean).join(' ');
 }
+
+/**
+ * Agrupa llamadas seguidas en una sola, `ms` después de la última. Se usa en
+ * las búsquedas en vivo: sin esto, cada tecla dispararía una consulta.
+ * La función devuelta expone `.cancel()` para descartar una ejecución
+ * pendiente (por ejemplo, al cerrar el campo antes de que dispare).
+ */
+export function debounce(fn, ms = 250) {
+  let timer = null;
+  const wrapped = (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  };
+  wrapped.cancel = () => clearTimeout(timer);
+  return wrapped;
+}

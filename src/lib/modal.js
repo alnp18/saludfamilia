@@ -1,4 +1,5 @@
 import { closeDateRangePopover } from './dateRange.js';
+import { closeLiveSearchDropdown } from './liveSearch.js';
 
 let toastTimer;
 
@@ -62,10 +63,11 @@ export function showModal(title, bodyHtml, buttons = []) {
 
 export function closeModal() {
   document.getElementById('overlay').classList.remove('open');
-  // El popover del selector de rango de fechas vive en document.body, fuera
-  // del modal (ver src/lib/dateRange.js) — se cierra explícitamente para no
-  // dejarlo huérfano si el modal se cierra con uno abierto.
+  // Las ventanas flotantes ancladas (calendario de rango y desplegable de
+  // resultados de búsqueda) viven en document.body, fuera del modal, así que
+  // no desaparecen solas al cerrarlo.
   closeDateRangePopover();
+  closeLiveSearchDropdown();
 }
 
 export function setModalMaxWidth(px) {
