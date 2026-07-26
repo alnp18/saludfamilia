@@ -13,6 +13,7 @@ import { openImageCropper } from '../lib/imageCropper.js';
 import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
+import { coincideAprox } from '../lib/searchSources.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -72,6 +73,13 @@ let cronicoSectionOpen = null; // null = aún no se sabe (se decide al cargar se
 let cronicoAddOpen = false;    // mini-formulario "+ Agregar diagnóstico" (alta o edición) abierto
 let editingDiagnosis = null;   // objeto completo si se edita uno existente; null si es nuevo
 
+// Buscador de la vista Pacientes (Fase 2 — auditoría móvil 2026-07-26).
+// El índice se arma una vez por carga de la vista y se filtra en memoria: son
+// los pacientes de una familia, no hace falta ir a la base en cada tecla.
+let searchIndex = [];   // [{ patient, campos: [{ etiqueta, texto, visible }] }]
+let searchQuery = '';   // se conserva entre re-renders para que editar un
+                        // paciente no borre el filtro que estaba aplicado
+
 export async function render() {
   const container = document.getElementById('view-patients');
   if (!container) return;
@@ -84,12 +92,15 @@ export async function render() {
       </div>
       <button class="btn btn-primary" id="btn-new-patient"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nuevo paciente</button>
     </div>
+    <div id="patients-search-bar"></div>
     <div class="patients-grid" id="patients-grid"></div>
   `;
   document.getElementById('btn-new-patient').addEventListener('click', () => openPatientModal());
 
   const grid = document.getElementById('patients-grid');
   let patients;
+  let policies = [];
+  let diagnoses = [];
   try {
     patients = await api.listPatients(state.household.id);
   } catch (err) {
@@ -99,6 +110,19 @@ export async function render() {
     return;
   }
   document.getElementById('sb-badge-patients').textContent = patients.length;
+
+  // Pólizas y diagnósticos alimentan el buscador, no las tarjetas. Si fallan,
+  // la vista igual se pinta y se busca sobre el resto de los campos: perder
+  // el buscador completo por una consulta secundaria sería peor.
+  try {
+    [policies, diagnoses] = await Promise.all([
+      api.listHouseholdPolicies(state.household.id),
+      api.listHouseholdDiagnoses(state.household.id),
+    ]);
+  } catch {
+    policies = [];
+    diagnoses = [];
+  }
 
   // Orden de la tarjetas (Fase 2 — auditoría móvil 2026-07-26): el paciente
   // activo siempre primero, y el resto alfabético por nombre completo. Una
@@ -112,6 +136,8 @@ export async function render() {
   }
 
   if (!patients.length) {
+    searchIndex = [];
+    searchQuery = '';
     grid.innerHTML = emptyStateHtml({
       icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87m-4-12a4 4 0 010 7.75"/></svg>',
       title: 'Sin pacientes registrados',
@@ -123,7 +149,114 @@ export async function render() {
     return;
   }
 
-  grid.innerHTML = patients.map(p => {
+  searchIndex = patients.map(p => ({
+    patient: p,
+    campos: camposBuscables(p,
+      policies.filter(x => x.patientId === p.id),
+      diagnoses.filter(x => x.patientId === p.id)),
+  }));
+  renderSearchBar();
+  renderPatientsGrid();
+}
+
+/**
+ * Campos por los que se puede encontrar a un paciente — Fase 2, buscador
+ * transversal. `visible: true` marca lo que ya se lee en la propia tarjeta:
+ * esos no generan la etiqueta de "coincide en", porque señalar algo que la
+ * persona está viendo no aporta nada.
+ */
+function camposBuscables(p, policies, diagnoses) {
+  // El contacto es una estructura desde la migración 0009, pero un registro
+  // muy viejo (o importado de un .sfam anterior) puede seguir siendo texto
+  // libre; si no se contempla, ese contacto sería imposible de encontrar.
+  const ce = typeof p.contactoEmergencia === 'string'
+    ? { primerNombre: p.contactoEmergencia }
+    : (p.contactoEmergencia || {});
+  const campos = [
+    { etiqueta: 'Nombre', texto: p.nombre, visible: true },
+    { etiqueta: 'EPS', texto: p.eps, visible: true },
+    { etiqueta: 'Afiliado', texto: p.numeroAfiliado, visible: true },
+    { etiqueta: 'Documento', texto: [p.tipoDocumento, p.numeroDocumento].filter(Boolean).join(' ') },
+    { etiqueta: 'Ubicación', texto: [p.direccion, p.municipio, p.departamento].filter(Boolean).join(' ') },
+    { etiqueta: 'Contacto de emergencia', texto: [
+      nombreContactoEmergencia(ce), ce.parentesco, ce.telefono1, ce.telefono2,
+      ce.direccion, ce.municipio, ce.departamento].filter(Boolean).join(' ') },
+    { etiqueta: 'Notas', texto: p.notas },
+  ];
+  for (const pol of policies) {
+    campos.push({ etiqueta: 'Póliza', texto: [pol.tipo, pol.aseguradora, pol.numeroPoliza].filter(Boolean).join(' ') });
+  }
+  for (const d of diagnoses) {
+    campos.push({ etiqueta: 'Diagnóstico', texto: [d.codigoCie10, d.descripcion].filter(Boolean).join(' ') });
+  }
+  return campos.filter(c => c.texto);
+}
+
+function renderSearchBar() {
+  const bar = document.getElementById('patients-search-bar');
+  if (!bar) return;
+  bar.innerHTML = `
+    <div class="patients-search">
+      <svg class="ps-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="fi ps-input" id="patients-search-input" type="search" autocomplete="off"
+             placeholder="Buscar por nombre, documento, EPS, póliza, diagnóstico o contacto…"
+             value="${esc(searchQuery)}"/>
+      <button type="button" class="ps-clear${searchQuery ? '' : ' hidden'}" id="patients-search-clear" title="Limpiar" aria-label="Limpiar búsqueda">×</button>
+    </div>`;
+
+  const input = document.getElementById('patients-search-input');
+  input.addEventListener('input', () => {
+    searchQuery = input.value;
+    document.getElementById('patients-search-clear').classList.toggle('hidden', !searchQuery);
+    renderPatientsGrid();
+  });
+  document.getElementById('patients-search-clear').addEventListener('click', () => {
+    searchQuery = '';
+    input.value = '';
+    document.getElementById('patients-search-clear').classList.add('hidden');
+    renderPatientsGrid();
+    input.focus();
+  });
+}
+
+/**
+ * Pinta las tarjetas aplicando el filtro actual. Se llama en cada tecla, así
+ * que no vuelve a consultar nada: trabaja sobre `searchIndex`.
+ */
+function renderPatientsGrid() {
+  const grid = document.getElementById('patients-grid');
+  if (!grid) return;
+
+  const q = searchQuery.trim();
+  // Con una o dos letras no se filtra: casi todo coincide y la lista salta
+  // sin razón aparente mientras la persona todavía está escribiendo.
+  const filtrando = q.length >= 2;
+  const visibles = filtrando
+    ? searchIndex
+      .map(entry => ({ entry, coincidencias: entry.campos.filter(c => coincideAprox(c.texto, q)) }))
+      .filter(x => x.coincidencias.length)
+    : searchIndex.map(entry => ({ entry, coincidencias: [] }));
+
+  if (!visibles.length) {
+    grid.innerHTML = emptyStateHtml({
+      icon: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+      title: 'Sin coincidencias',
+      // emptyStateHtml inserta el texto tal cual: escapar acá es obligatorio,
+      // `q` es lo que escribió la persona.
+      message: `Ningún paciente coincide con “${esc(q)}”. Se busca en nombre, documento, EPS, ubicación, pólizas, diagnósticos y contacto de emergencia.`,
+      style: 'grid-column:1/-1',
+    });
+    return;
+  }
+
+  const patients = visibles.map(x => x.entry.patient);
+
+  grid.innerHTML = visibles.map(({ entry, coincidencias }) => {
+    const p = entry.patient;
+    // Solo se anuncian las coincidencias que la tarjeta no muestra por sí
+    // misma: si apareció por la póliza o por el contacto de emergencia, sin
+    // esto la tarjeta parecería salir de la nada.
+    const etiquetas = [...new Set(coincidencias.filter(c => !c.visible).map(c => c.etiqueta))];
     const ac = avatarColor(p.nombre);
     const sel = state.activePatient?.id === p.id;
     const age = p.fechaNacimiento ? calcAge(p.fechaNacimiento) : null;
@@ -150,6 +283,7 @@ export async function render() {
         ${p.eps ? `<span>${esc(p.eps)}</span>` : ''}
         ${p.numeroAfiliado ? `<span style="font-family:'JetBrains Mono',monospace">${esc(p.numeroAfiliado)}</span>` : ''}
       </div>
+      ${etiquetas.length ? `<div class="pc-match">Coincide en ${etiquetas.map(e => `<span class="pc-match-tag">${esc(e)}</span>`).join('')}</div>` : ''}
     </div>`;
   }).join('');
   hydrateAvatarsIn(grid, patients);

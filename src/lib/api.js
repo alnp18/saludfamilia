@@ -164,6 +164,18 @@ export async function listPatientPolicies(patientId) {
   return data.map(rowToPolicy);
 }
 
+/**
+ * Todas las pólizas del household de una vez — para el buscador de la vista
+ * Pacientes (Fase 2), que necesita mirar dentro de las pólizas de todos sin
+ * hacer una consulta por paciente.
+ */
+export async function listHouseholdPolicies(householdId) {
+  const { data, error } = await supabase.from('patient_policies').select('*')
+    .eq('household_id', householdId);
+  if (error) throw error;
+  return data.map(rowToPolicy);
+}
+
 export async function savePatientPolicy(policy, householdId, patientId) {
   const row = {
     household_id: householdId,
@@ -208,6 +220,14 @@ function rowToDiagnosis(r) {
 export async function listPatientDiagnoses(patientId) {
   const { data, error } = await supabase.from('patient_diagnoses').select('*')
     .eq('patient_id', patientId).order('created_at');
+  if (error) throw error;
+  return data.map(rowToDiagnosis);
+}
+
+/** Todos los diagnósticos del household — ver listHouseholdPolicies. */
+export async function listHouseholdDiagnoses(householdId) {
+  const { data, error } = await supabase.from('patient_diagnoses').select('*')
+    .eq('household_id', householdId);
   if (error) throw error;
   return data.map(rowToDiagnosis);
 }

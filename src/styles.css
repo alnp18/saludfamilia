@@ -714,6 +714,26 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .pc-tag { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600; padding:3px 9px; border-radius:20px; background:var(--t-primary-dim); color:var(--t-primary-lt); border:1px solid var(--t-border); }
 .pc-tag svg { width:11px; height:11px; }
 
+/* ══ BUSCADOR DE PACIENTES (Fase 2, auditoría móvil) ══ */
+.patients-search { position:relative; display:flex; align-items:center; margin-bottom:14px; }
+.patients-search .ps-icon {
+  position:absolute; left:11px; width:15px; height:15px; color:var(--tm); pointer-events:none;
+}
+.patients-search .ps-input { padding-left:33px; padding-right:30px; }
+/* La X nativa del type=search duplicaría el botón de limpiar propio. */
+.patients-search .ps-input::-webkit-search-cancel-button { display:none; }
+.ps-clear {
+  position:absolute; right:6px; width:20px; height:20px; border:none; background:none;
+  color:var(--tm); cursor:pointer; font-size:17px; line-height:1; border-radius:4px;
+  display:flex; align-items:center; justify-content:center;
+}
+.ps-clear:hover { color:var(--tp); background:var(--card2); }
+.pc-match { font-size:11px; color:var(--ts); display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+.pc-match-tag {
+  font-size:10px; text-transform:uppercase; letter-spacing:.4px;
+  color:var(--t-primary-lt); background:var(--t-primary-dim); padding:2px 6px; border-radius:4px;
+}
+
 /* ══ ORDERS ══ */
 .stepper { display:flex; align-items:flex-start; margin:4px 0; }
 .step { flex:1; display:flex; flex-direction:column; align-items:center; gap:5px; position:relative; }

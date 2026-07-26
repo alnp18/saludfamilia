@@ -41,6 +41,73 @@ export function coincide(texto, query) {
 }
 
 /**
+ * Distancia de edición acotada: cuántas letras hay que cambiar, agregar o
+ * quitar para pasar de `a` a `b`. Se corta apenas supera `max` porque solo
+ * interesa saber "¿es un error de tipeo?", no la distancia exacta.
+ */
+function distanciaEdicion(a, b, max) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let previa = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const fila = [i];
+    let mejorDeLaFila = i;
+    for (let j = 1; j <= b.length; j++) {
+      const costo = a[i - 1] === b[j - 1] ? 0 : 1;
+      fila[j] = Math.min(fila[j - 1] + 1, previa[j] + 1, previa[j - 1] + costo);
+      if (fila[j] < mejorDeLaFila) mejorDeLaFila = fila[j];
+    }
+    // Si la fila entera ya está por encima del tope, ninguna fila siguiente
+    // puede bajar de ahí: se corta sin terminar la matriz.
+    if (mejorDeLaFila > max) return max + 1;
+    previa = fila;
+  }
+  return previa[b.length];
+}
+
+/**
+ * Cuántos errores de tipeo se toleran según el largo de lo escrito. Las
+ * palabras cortas no admiten ninguno: con 3 letras, un error de distancia 1
+ * hace que "ana" encuentre "ama", "una" y "ana" por igual, que es ruido.
+ */
+function toleranciaPara(palabra) {
+  if (palabra.length <= 3) return 0;
+  if (palabra.length <= 6) return 1;
+  return 2;
+}
+
+/**
+ * Como `coincide`, pero perdona errores de tipeo — auditoría móvil
+ * 2026-07-26, Fase 2 (buscador de Pacientes).
+ *
+ * Primero intenta la coincidencia exacta por subcadena, que es la que
+ * responde a lo que la gente hace la mayoría de las veces (escribir bien las
+ * primeras letras). Solo si esa falla se prueba palabra por palabra con
+ * tolerancia a erratas, para que "gonzalez" siga encontrando a "González" y
+ * "cardilogia" a "Cardiología" — escribir en un teléfono es propenso a esto.
+ *
+ * La aproximación se hace contra palabras completas del texto y no contra
+ * cualquier fragmento: si no, con distancia 2 casi todo se parece a casi
+ * todo y el buscador dejaría de filtrar.
+ */
+export function coincideAprox(texto, query) {
+  if (coincide(texto, query)) return true;
+  const palabrasTexto = normalizar(texto).split(/\s+/).filter(Boolean);
+  if (!palabrasTexto.length) return false;
+  const palabrasQuery = normalizar(query).split(/\s+/).filter(Boolean);
+  if (!palabrasQuery.length) return false;
+  return palabrasQuery.every(q => {
+    const max = toleranciaPara(q);
+    if (max === 0) return palabrasTexto.some(p => p.includes(q));
+    return palabrasTexto.some(p =>
+      // Se compara contra el prefijo del mismo largo además de la palabra
+      // entera, para que escribir a medias siga funcionando: "cardio" tiene
+      // que encontrar "cardiologia" aunque la distancia entre las dos sea 5.
+      distanciaEdicion(q, p, max) <= max ||
+      distanciaEdicion(q, p.slice(0, q.length), max) <= max);
+  });
+}
+
+/**
  * Filtra una lista comparando `query` contra los campos indicados.
  * @param {object[]} items
  * @param {string} query
