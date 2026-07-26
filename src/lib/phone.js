@@ -17,9 +17,10 @@ import { Icons } from './icons.js';
  *    número puede estar recién escrito y todavía sin guardar. Lee el valor
  *    actual del input en el momento del click.
  *
- * El wiring es por delegación global (`initCallButtons`, una sola vez desde
- * main.js): los módulos re-arman su HTML con innerHTML constantemente, así
- * que enganchar listeners por render sería frágil y fácil de olvidar.
+ * Los enlaces de las vistas no necesitan wiring (la navegación "tel:" es
+ * nativa); los botones de formulario sí, y se conectan por delegación global
+ * (`initCallButtons`, una sola vez desde main.js) porque los módulos re-arman
+ * su HTML con innerHTML constantemente.
  */
 
 /**
@@ -51,8 +52,6 @@ export function telHref(numero) {
   return extMatch ? `${base},${extMatch[1]}` : base;
 }
 
-const ICONO_TELEFONO = Icons.phone;
-
 /**
  * Enlace "Llamar" para vistas de solo lectura. Devuelve cadena vacía si el
  * número no es marcable, para que el llamador no tenga que validar antes.
@@ -62,8 +61,8 @@ const ICONO_TELEFONO = Icons.phone;
 export function callLinkHtml(numero, { label = false } = {}) {
   const href = telHref(numero);
   if (!href) return '';
-  return `<a class="call-btn" href="tel:${esc(href)}" data-call title="Llamar a ${esc(numero)}">`
-    + `${ICONO_TELEFONO}${label ? `<span>${esc(numero)}</span>` : '<span>Llamar</span>'}</a>`;
+  return `<a class="call-btn" href="tel:${esc(href)}" title="Llamar a ${esc(numero)}">`
+    + `${Icons.phone}${label ? `<span>${esc(numero)}</span>` : '<span>Llamar</span>'}</a>`;
 }
 
 /**
@@ -72,7 +71,7 @@ export function callLinkHtml(numero, { label = false } = {}) {
  * @param {string} inputId - id del <input> de teléfono asociado.
  */
 export function callInputButtonHtml(inputId) {
-  return `<button type="button" class="call-btn call-btn-icon" data-call-input="${esc(inputId)}" title="Llamar a este número">${ICONO_TELEFONO}</button>`;
+  return `<button type="button" class="call-btn call-btn-icon" data-call-input="${esc(inputId)}" title="Llamar a este número">${Icons.phone}</button>`;
 }
 
 /**
@@ -90,59 +89,17 @@ export function phoneFieldHtml({ id, label, placeholder = '', value = '', span =
     </div>`;
 }
 
-// ─────────────────────────────────────────
-// Permiso de micrófono
-// ─────────────────────────────────────────
-
-let micSolicitado = false;
-
-/**
- * Solicita el permiso de micrófono del dispositivo la primera vez que se usa
- * el botón Llamar.
- *
- * IMPORTANTE — decisión de producto, no una necesidad técnica: marcar por
- * "tel:" delega la llamada a la app de teléfono del sistema, que usa el
- * micrófono con sus propios permisos; el navegador no necesita ninguno. Se
- * pide igual por pedido explícito del hallazgo de la auditoría, pero de
- * forma deliberadamente inofensiva:
- *  · nunca bloquea la llamada — si se deniega o falla, se marca igual;
- *  · se pide una sola vez por sesión, no en cada llamada;
- *  · el stream se cierra de inmediato, para no dejar el indicador de
- *    grabación encendido ni consumir batería.
- * Si en el futuro se implementan llamadas dentro de la app (WebRTC), este
- * es el punto donde ese permiso pasaría a usarse de verdad.
- */
-async function solicitarMicrofono() {
-  if (micSolicitado || !navigator.mediaDevices?.getUserMedia) return;
-  micSolicitado = true;
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    stream.getTracks().forEach(t => t.stop());
-  } catch {
-    // Permiso denegado o no disponible: irrelevante para marcar.
-  }
-}
-
 /**
  * Conecta, una sola vez, todos los botones Llamar presentes y futuros
  * mediante delegación de eventos en `document`.
  */
 export function initCallButtons() {
   document.addEventListener('click', (e) => {
-    const link = e.target.closest('[data-call]');
-    if (link) {
-      // La navegación "tel:" la maneja el <a> nativo; el permiso se pide en
-      // paralelo, sin await, para no interferir con ella.
-      solicitarMicrofono();
-      return;
-    }
-
     const btn = e.target.closest('[data-call-input]');
     if (!btn) return;
     const input = document.getElementById(btn.dataset.callInput);
     const href = telHref(input?.value);
     if (!href) return; // sin número marcable no hay nada que hacer
-    solicitarMicrofono();
     window.location.href = `tel:${href}`;
   });
 }

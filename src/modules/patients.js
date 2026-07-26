@@ -4,7 +4,7 @@ import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
-import { esc, initials, avatarColor, calcAge, fmtDate } from '../lib/utils.js';
+import { esc, initials, avatarColor, calcAge, fmtDate, nombreContactoEmergencia } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/avatar.js';
 import { openViewOverlay } from '../lib/viewModeOverlay.js';
@@ -181,9 +181,7 @@ async function openPatientViewMode(id) {
   }
   const age = patient.fechaNacimiento ? calcAge(patient.fechaNacimiento) + ' años' : null;
   const ce = patient.contactoEmergencia;
-  const ceNombre = ce
-    ? [ce.primerNombre, ce.segundoNombre, ce.primerApellido, ce.segundoApellido].filter(Boolean).join(' ')
-    : '';
+  const ceNombre = nombreContactoEmergencia(ce);
 
   const policiesHtml = policies.length ? policies.map(pol => `
     <div class="policy-item">

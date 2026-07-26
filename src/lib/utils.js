@@ -68,3 +68,14 @@ export function readFileAsDataURL(file) {
     r.readAsDataURL(file);
   });
 }
+
+/**
+ * Nombre completo del contacto de emergencia a partir de su estructura
+ * (columna jsonb `contacto_emergencia`, ver migración 0009). Vive acá
+ * porque lo arman por igual la ficha del paciente y el dashboard.
+ */
+export function nombreContactoEmergencia(ce) {
+  if (!ce) return '';
+  return [ce.primerNombre, ce.segundoNombre, ce.primerApellido, ce.segundoApellido]
+    .filter(Boolean).join(' ');
+}

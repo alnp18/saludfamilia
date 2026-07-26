@@ -1,9 +1,10 @@
 import { state } from '../state.js';
 import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
-import { esc, initials, avatarColor, fmtDate, today, daysFrom, calcAge } from '../lib/utils.js';
+import { esc, initials, avatarColor, fmtDate, today, daysFrom, calcAge, nombreContactoEmergencia } from '../lib/utils.js';
 import { hydrateAvatar } from '../lib/avatar.js';
-import { showToast } from '../lib/modal.js';
+import { showModal, closeModal, showToast } from '../lib/modal.js';
+import { callLinkHtml } from '../lib/phone.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { openMedUsoModal } from './meds.js';
@@ -11,6 +12,57 @@ import { openMedUsoModal } from './meds.js';
 let calYear, calMonth;
 let clockTimer = null;
 let calEventDates = [];
+
+/**
+ * Ventana flotante con el contacto de emergencia del paciente activo
+ * (pedido de producto 2026-07-26): en una urgencia hay que llegar a este
+ * dato en un toque, sin entrar a la ficha completa y buscarlo.
+ *
+ * Los teléfonos llevan su botón Llamar (src/lib/phone.js), que es el punto
+ * de la pantalla: ver el número y marcarlo sin copiarlo a mano.
+ */
+function openEmergencyContactModal(patient) {
+  const ce = patient.contactoEmergencia;
+  const nombre = nombreContactoEmergencia(ce);
+
+  if (!ce || !nombre) {
+    showModal(
+      'Contacto de emergencia',
+      `<div class="form-body">
+        <p style="font-size:13px;color:var(--ts);margin:0">
+          Este paciente todavía no tiene un contacto de emergencia registrado.
+          Puedes agregarlo desde su ficha, en la sección "Contacto de emergencia".
+        </p>
+      </div>`,
+      [
+        { label: 'Cerrar', cls: 'btn', action: closeModal },
+        { label: 'Ir a la ficha', cls: 'btn btn-primary', action: () => { closeModal(); goViewCb?.('patients'); } },
+      ]
+    );
+    return;
+  }
+
+  // [etiqueta, html ya listo] — los teléfonos traen marcado propio, así que
+  // cada fila decide su HTML en vez de escaparse toda igual.
+  const ubicacion = [ce.municipio, ce.departamento].filter(Boolean).join(', ');
+  const filas = [
+    ['Nombre', esc(nombre)],
+    ['Parentesco', ce.parentesco ? esc(ce.parentesco) : ''],
+    ['Teléfono 1', ce.telefono1 ? `${esc(ce.telefono1)} ${callLinkHtml(ce.telefono1)}` : ''],
+    ['Teléfono 2', ce.telefono2 ? `${esc(ce.telefono2)} ${callLinkHtml(ce.telefono2)}` : ''],
+    ['Ubicación', ubicacion ? esc(ubicacion) : ''],
+    ['Dirección', ce.direccion ? esc(ce.direccion) : ''],
+  ].filter(([, v]) => v);
+
+  showModal(
+    'Contacto de emergencia',
+    `<div class="form-body">
+      <p style="font-size:12.5px;color:var(--ts);margin:0 0 12px">Contacto de ${esc(patient.nombre)}.</p>
+      ${filas.map(([k, v]) => `<div class="dir-row"><strong style="min-width:100px;font-weight:500;color:var(--ts)">${k}</strong><span style="color:var(--tp);font-weight:500">${v}</span></div>`).join('')}
+    </div>`,
+    [{ label: 'Cerrar', cls: 'btn', action: closeModal }]
+  );
+}
 
 function initCalIfNeeded() {
   if (calYear == null) {
@@ -183,7 +235,6 @@ export async function render() {
     ['Tipo de sangre', patient.tipoSangre || '—'],
     ['EPS', patient.eps || '—'],
     ['No. afiliado', patient.numeroAfiliado || '—'],
-    ['Contacto emerg.', patient.contactoEmergencia || '—'],
   ].filter(([, v]) => v !== '—');
 
   container.innerHTML = `
@@ -275,15 +326,18 @@ export async function render() {
             <div class="quick-action" id="qa-new-vital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Registrar signos vitales</div>
           </div>
         </div>
-        ${fields.length ? `<div class="card">
+        <div class="card">
           <div class="card-hd"><div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div><h2>Datos del paciente</h2>
             <button class="btn btn-sm" id="dash-edit-patient" style="margin-left:auto">Editar</button>
           </div>
           <div style="padding:8px 16px 12px">
             ${fields.map(([l, v]) => `<div class="pir"><span class="pir-label">${l}</span><span class="pir-val">${esc(v)}</span></div>`).join('')}
             ${patient.notas ? `<div style="margin-top:10px;font-size:12px;color:var(--ts);line-height:1.5;background:var(--surface);border-radius:6px;padding:8px 10px">${esc(patient.notas)}</div>` : ''}
+            <button class="btn btn-sm" id="dash-emergency-contact" style="width:100%;margin-top:12px;justify-content:center">
+              ${Icons.phone} Mostrar contacto de emergencia
+            </button>
           </div>
-        </div>` : ''}
+        </div>
       </div>
     </div>
   `;
@@ -301,6 +355,7 @@ export async function render() {
   document.getElementById('qa-new-med')?.addEventListener('click', () => goViewCb?.('meds', { openModal: true }));
   document.getElementById('qa-new-vital')?.addEventListener('click', () => goViewCb?.('vitals', { openModal: true }));
   document.getElementById('dash-edit-patient')?.addEventListener('click', () => goViewCb?.('patients'));
+  document.getElementById('dash-emergency-contact')?.addEventListener('click', () => openEmergencyContactModal(patient));
   document.getElementById('cal-prev')?.addEventListener('click', () => calNav(-1));
   document.getElementById('cal-next')?.addEventListener('click', () => calNav(1));
   container.querySelectorAll('[data-uso-med]').forEach(b =>
