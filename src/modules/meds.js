@@ -5,6 +5,7 @@ import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
+import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 
 // Vía de administración: fijas + "Otra…" extensible (ver nota transversal
 // del plan — mismo patrón que Pólizas en Pacientes y Especialidad en
@@ -409,8 +410,7 @@ export async function openMedModal(id, prefill = null) {
         <div class="form-field span2 hidden" id="horarios-builder-wrap"><label class="fl">Horarios de toma</label><div class="horarios-builder" id="horarios-builder"></div></div>
         <div class="form-field"><label class="fl">Vía de administración</label><select class="fi" id="mf-via"><option value="">Seleccionar…</option>${catalogOptionsHtml(VIA_OPTIONS_FIJAS, customVia, viaSelected)}</select></div>
         <div class="form-field ${pendingViaOtra ? '' : 'hidden'}" id="mf-via-otra-field"><label class="fl">Especificar vía</label><input class="fi" id="mf-via-otra" type="text" placeholder="Ej: Vía intraósea" value="${esc(pendingViaOtra ? m.via : '')}"/></div>
-        <div class="form-field"><label class="fl">Fecha de inicio</label><input class="fi" id="mf-inicio" type="date" value="${esc(m?.fechaInicio || '')}"/></div>
-        <div class="form-field"><label class="fl">Fecha de fin (opcional)</label><input class="fi" id="mf-fin" type="date" value="${esc(m?.fechaFin || '')}"/></div>
+        ${dateRangeFieldHtml('mf-vigencia', { label: 'Vigencia (fin opcional)', span: true })}
         <div class="form-field span2"><label class="fl">Observaciones</label><textarea class="fi" id="mf-obs" rows="2" placeholder="Tomar con alimentos, no suspender sin consultar…">${esc(m?.observaciones || '')}</textarea></div>
         ${willVersion ? `<div class="form-field span2"><label class="fl">Motivo del cambio (opcional)</label><input class="fi" id="mf-motivo" type="text" placeholder="Ej: Ajuste de dosis por control médico 15/jun"/></div>` : ''}
       </div>
@@ -420,7 +420,8 @@ export async function openMedModal(id, prefill = null) {
       { label: isEdit ? (willVersion ? 'Guardar nueva versión' : 'Guardar cambios') : 'Agregar medicamento', cls: 'btn btn-primary', action: () => saveMedForm(id) },
     ]
   );
-  if (!m) document.getElementById('mf-inicio').value = today();
+  wireDateRangeField('mf-vigencia');
+  fillDateRangeField('mf-vigencia', m?.fechaInicio || (!m ? today() : ''), m?.fechaFin || '');
 
   document.getElementById('mf-freq').addEventListener('change', (e) => {
     applyFrequencyChange(e.target.value);
@@ -446,6 +447,7 @@ async function saveMedForm(editId) {
     showToast('Escribe la vía de administración', 'err'); return;
   }
   const via = await resolveCatalogValue(state.household.id, CATEGORIA_VIA, viaSel, document.getElementById('mf-via-otra').value);
+  const vigencia = readDateRangeField('mf-vigencia');
 
   const newData = {
     nombre, dosis,
@@ -455,8 +457,8 @@ async function saveMedForm(editId) {
     via,
     indicacion: document.getElementById('mf-indicacion').value.trim(),
     controlado: document.getElementById('mf-controlado').checked,
-    fechaInicio: document.getElementById('mf-inicio').value,
-    fechaFin: document.getElementById('mf-fin').value,
+    fechaInicio: vigencia.inicio,
+    fechaFin: vigencia.fin,
     observaciones: document.getElementById('mf-obs').value.trim(),
   };
   const motivo = document.getElementById('mf-motivo')?.value?.trim() || '';

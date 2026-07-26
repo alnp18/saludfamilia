@@ -144,6 +144,9 @@ function rowToPolicy(r) {
     tipo: r.tipo,
     numeroPoliza: r.numero_poliza,
     aseguradora: r.aseguradora,
+    // Vigencia (Fase 1 — patrón Rango de fechas, auditoría móvil 2026-07-25).
+    fechaInicio: r.fecha_inicio,
+    fechaFin: r.fecha_fin,
     imagen: r.imagen,
     creadoEn: r.created_at,
   };
@@ -163,6 +166,8 @@ export async function savePatientPolicy(policy, householdId, patientId) {
     tipo: policy.tipo,
     numero_poliza: policy.numeroPoliza || null,
     aseguradora: policy.aseguradora || null,
+    fecha_inicio: policy.fechaInicio || null,
+    fecha_fin: policy.fechaFin || null,
     imagen: policy.imagen || null,
   };
   if (policy.id) {

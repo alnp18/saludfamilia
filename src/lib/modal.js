@@ -1,3 +1,5 @@
+import { closeDateRangePopover } from './dateRange.js';
+
 let toastTimer;
 
 export function showToast(msg, type = 'ok') {
@@ -60,6 +62,10 @@ export function showModal(title, bodyHtml, buttons = []) {
 
 export function closeModal() {
   document.getElementById('overlay').classList.remove('open');
+  // El popover del selector de rango de fechas vive en document.body, fuera
+  // del modal (ver src/lib/dateRange.js) — se cierra explícitamente para no
+  // dejarlo huérfano si el modal se cierra con uno abierto.
+  closeDateRangePopover();
 }
 
 export function setModalMaxWidth(px) {

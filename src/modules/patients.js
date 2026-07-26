@@ -11,6 +11,7 @@ import { openViewOverlay } from '../lib/viewModeOverlay.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { openImageCropper } from '../lib/imageCropper.js';
 import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
+import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -181,6 +182,7 @@ async function openPatientViewMode(id) {
       <div class="policy-info">
         <div class="policy-tipo">${esc(pol.tipo)}${pol.aseguradora ? ' · ' + esc(pol.aseguradora) : ''}</div>
         <div class="policy-num">${pol.numeroPoliza ? esc(pol.numeroPoliza) : 'Sin número registrado'}</div>
+        ${pol.fechaInicio || pol.fechaFin ? `<div class="policy-num">Vigencia: ${pol.fechaInicio ? fmtDate(pol.fechaInicio) : '—'} – ${pol.fechaFin ? fmtDate(pol.fechaFin) : '—'}</div>` : ''}
       </div>
       ${pol.imagen ? `<div class="policy-actions"><button type="button" class="btn btn-sm btn-ghost" data-pv-view-policy="${pol.id}">Ver carnet</button></div>` : ''}
     </div>`).join('') : `<p style="font-size:12.5px;color:var(--ts);margin:0">Sin pólizas registradas.</p>`;
@@ -543,6 +545,7 @@ async function renderPoliciesSection(patientId) {
       <div class="policy-info">
         <div class="policy-tipo">${esc(pol.tipo)}${pol.aseguradora ? ' · ' + esc(pol.aseguradora) : ''}</div>
         <div class="policy-num">${pol.numeroPoliza ? esc(pol.numeroPoliza) : 'Sin número registrado'}</div>
+        ${pol.fechaInicio || pol.fechaFin ? `<div class="policy-num">Vigencia: ${pol.fechaInicio ? fmtDate(pol.fechaInicio) : '—'} – ${pol.fechaFin ? fmtDate(pol.fechaFin) : '—'}</div>` : ''}
       </div>
       <div class="policy-actions">
         ${pol.imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-policy="${pol.id}">Ver carnet</button>` : ''}
@@ -579,6 +582,7 @@ async function renderPoliciesSection(patientId) {
           <label class="fl">Nombre de la aseguradora</label>
           <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…" value="${editingPolicy ? esc(editingPolicy.aseguradora || '') : ''}"/>
         </div>
+        ${dateRangeFieldHtml('pf-policy-vigencia', { label: 'Vigencia' })}
         <div class="form-field span2">
           <label class="fl">Foto del carnet (o PDF ya escaneado)</label>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
@@ -620,6 +624,8 @@ async function renderPoliciesSection(patientId) {
     }));
 
   if (policyFormOpen) {
+    wireDateRangeField('pf-policy-vigencia');
+    fillDateRangeField('pf-policy-vigencia', editingPolicy?.fechaInicio, editingPolicy?.fechaFin);
     document.getElementById('pf-policy-tipo').addEventListener('change', (e) => {
       pendingPolicyTipo = e.target.value;
       renderPoliciesSection(patientId);
@@ -697,6 +703,7 @@ async function savePolicyInline(patientId) {
   }
   const numeroPoliza = document.getElementById('pf-policy-numero').value.trim();
   const aseguradora = document.getElementById('pf-policy-aseguradora').value.trim();
+  const vigencia = readDateRangeField('pf-policy-vigencia');
   const wasEditing = !!editingPolicy;
   const oldImagePath = editingPolicy?.imagen?.path;
   try {
@@ -704,7 +711,9 @@ async function savePolicyInline(patientId) {
     let imagen = editingPolicy?.imagen || null;
     if (pendingPolicyImageRemoved) imagen = null;
     const base = editingPolicy ? { id: editingPolicy.id, imagen } : { imagen };
-    let saved = await api.savePatientPolicy({ ...base, tipo, numeroPoliza, aseguradora }, state.household.id, patientId);
+    let saved = await api.savePatientPolicy(
+      { ...base, tipo, numeroPoliza, aseguradora, fechaInicio: vigencia.inicio, fechaFin: vigencia.fin },
+      state.household.id, patientId);
     if (pendingPolicyImage) {
       const uploaded = await files.uploadAttachment(state.household.id, saved.id, 'poliza', pendingPolicyImage);
       saved = await api.savePatientPolicy({ ...saved, imagen: uploaded }, state.household.id, patientId);

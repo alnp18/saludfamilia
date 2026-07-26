@@ -288,6 +288,36 @@ select.fi {
 select.fi option { background: var(--card2); }
 textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 
+/* ══ RANGO DE FECHAS (patrón transversal, auditoría móvil) ══ */
+.dr-trigger { text-align: left; cursor: pointer; color: var(--tp); }
+.dr-trigger.dr-trigger-empty { color: var(--tm); }
+.dr-popover {
+  position: fixed; z-index: 600; background: var(--card); border: 1px solid var(--border-lt);
+  border-radius: var(--r-sm); box-shadow: 0 16px 48px rgba(0,0,0,.55); padding: 14px;
+  width: 560px; max-width: calc(100vw - 24px);
+}
+.dr-popover-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.dr-nav {
+  width: 28px; height: 28px; border-radius: var(--r-sm); border: 1px solid var(--border);
+  background: var(--surface); color: var(--ts); cursor: pointer; font-size: 15px; line-height: 1;
+}
+.dr-nav:hover { border-color: var(--t-primary); color: var(--t-primary-lt); }
+.dr-months { display: flex; gap: 18px; flex-wrap: wrap; }
+.dr-month { flex: 1; min-width: 220px; }
+.dr-month-title { text-align: center; font-size: 13px; font-weight: 600; color: var(--tp); margin-bottom: 6px; text-transform: capitalize; }
+.dr-weekdays, .dr-days { display: grid; grid-template-columns: repeat(7, 1fr); }
+.dr-weekdays span { text-align: center; font-size: 10.5px; color: var(--tm); padding: 2px 0; }
+.dr-day {
+  display: flex; align-items: center; justify-content: center; aspect-ratio: 1;
+  font-size: 12.5px; color: var(--tp); cursor: pointer; border-radius: 6px;
+}
+.dr-day:hover:not(.dr-day-empty) { background: var(--t-primary-dim); }
+.dr-day-empty { cursor: default; }
+.dr-day-today { box-shadow: inset 0 0 0 1px var(--border-lt); }
+.dr-day-in-range { background: var(--t-primary-dim); border-radius: 0; }
+.dr-day-start, .dr-day-end { background: var(--t-primary); color: #fff; font-weight: 600; }
+.dr-popover-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+
 /* ══ MODAL ══ */
 #overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,.72); z-index: 500;

@@ -9,6 +9,7 @@ import { SPECIALTIES } from './doctors.js';
 import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
+import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 
 const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamentos/Insumos/Terapias', 'Examen', 'Laboratorio', 'Otro'];
 const STAGE_ORDER = ['A', 'B', 'C', 'D', 'Finalizado'];
@@ -782,8 +783,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
     </div>
   ` : `
     <div class="form-row cols-2">
-      <div class="form-field"><label class="fl">Fecha de inicio</label><input class="fi" id="of-auth-inicio" type="date"/></div>
-      <div class="form-field"><label class="fl">Fecha de vencimiento</label><input class="fi" id="of-auth-vence" type="date"/></div>
+      ${dateRangeFieldHtml('of-auth-vigencia', { label: 'Vigencia de la autorización', span: true })}
       <div class="form-field span2"><label class="fl">Número de autorización</label><input class="fi" id="of-auth-num" type="text" placeholder="AUT-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
       <div class="form-field span2">
         <label class="fl">Centro médico</label>
@@ -812,11 +812,13 @@ function renderPaneC(tipoOrden, o, centerOptions) {
     }
     mesesInput.addEventListener('input', () => regenerateAuthRows(mesesInput.value));
     regenerateAuthRows(mesesInput.value);
-  } else if (o) {
-    document.getElementById('of-auth-inicio').value = o.auth_fechaInicio || '';
-    document.getElementById('of-auth-vence').value = o.auth_fechaVence || '';
-    document.getElementById('of-auth-num').value = o.auth_numero || '';
-    document.getElementById('of-auth-centro').value = o.auth_centroId || '';
+  } else {
+    wireDateRangeField('of-auth-vigencia');
+    if (o) {
+      fillDateRangeField('of-auth-vigencia', o.auth_fechaInicio, o.auth_fechaVence);
+      document.getElementById('of-auth-num').value = o.auth_numero || '';
+      document.getElementById('of-auth-centro').value = o.auth_centroId || '';
+    }
   }
 }
 
@@ -917,8 +919,8 @@ async function saveOrderForm(editId) {
     // Etapa C: "Autorización" (un registro) vs "Autorizaciones" (tabla
     // mes a mes, MI AUDITORIA Órdenes #4) — solo uno de los dos juegos de
     // campos existe en el DOM según el tipo de orden actual.
-    auth_fechaInicio: authType ? '' : document.getElementById('of-auth-inicio').value,
-    auth_fechaVence: authType ? '' : document.getElementById('of-auth-vence').value,
+    auth_fechaInicio: authType ? '' : readDateRangeField('of-auth-vigencia').inicio,
+    auth_fechaVence: authType ? '' : readDateRangeField('of-auth-vigencia').fin,
     auth_numero: authType ? '' : document.getElementById('of-auth-num').value.trim(),
     auth_centroId: document.getElementById('of-auth-centro').value,
     auth_imagen: orderFiles.autorizacion,
