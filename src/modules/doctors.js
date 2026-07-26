@@ -202,7 +202,6 @@ async function openDoctorModal(id) {
             </select>
             <button type="button" class="btn btn-sm btn-icon" id="df-centro-add-btn" title="Agregar centro médico al directorio">+</button>
           </div>
-          <div id="df-centro-newform" class="hidden"></div>
         </div>
         <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
         ${phoneFieldHtml({ id: 'df-tel', label: 'Teléfono / Ext.', placeholder: 'Número directo o extensión', value: d?.tel || '' })}
@@ -214,7 +213,7 @@ async function openDoctorModal(id) {
       { label: id ? 'Guardar cambios' : 'Agregar médico', cls: 'btn btn-primary', action: () => saveDoctorForm(id) },
     ]
   );
-  wireInlineNewCenter('df-centro', 'df-centro-add-btn', 'df-centro-newform');
+  wireInlineNewCenter('df-centro', 'df-centro-add-btn');
   document.getElementById('df-esp').addEventListener('change', (e) => {
     pendingEspOtra = e.target.value === OTRA_VALUE;
     document.getElementById('df-esp-otra-field').classList.toggle('hidden', !pendingEspOtra);

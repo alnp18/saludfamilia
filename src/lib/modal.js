@@ -62,12 +62,103 @@ export function showModal(title, bodyHtml, buttons = []) {
 }
 
 export function closeModal() {
+  // Si quedara alguno apilado encima, se va con el de abajo: un modal
+  // flotando sobre nada no tiene a qué volver.
+  while (modalStack.length) closeStackedModal();
   document.getElementById('overlay').classList.remove('open');
   // Las ventanas flotantes ancladas (calendario de rango y desplegable de
   // resultados de búsqueda) viven en document.body, fuera del modal, así que
   // no desaparecen solas al cerrarlo.
   closeDateRangePopover();
   closeLiveSearchDropdown();
+}
+
+// ─────────────────────────────────────────
+// Modales apilados — auditoría móvil 2026-07-26, Fase 3
+//
+// El modal genérico de arriba es una estructura fija del index.html: hay uno
+// solo, y `showModal` le reemplaza el contenido. Eso alcanzaba mientras nada
+// necesitara abrir un formulario ENCIMA de otro, pero el flujo
+// Centro → Médico → Orden sí lo necesita: se está creando un médico y hace
+// falta registrar el centro donde atiende, sin perder lo ya escrito.
+//
+// Reutilizar el modal de siempre no sirve para esto: reemplazar su innerHTML
+// destruye los listeners del formulario de abajo y no hay forma honesta de
+// restaurarlos. Por eso cada modal apilado es un overlay propio, creado y
+// destruido entero — al cerrarlo, el de abajo sigue intacto porque nunca se
+// tocó.
+//
+// z-index: 510, 520, … siempre por debajo de 600, que es donde viven el
+// calendario de rango y el desplegable de búsqueda. Así esos siguen
+// dibujándose por encima del modal apilado que los abrió.
+// ─────────────────────────────────────────
+
+const modalStack = [];
+
+/**
+ * Abre un modal encima del que ya está visible.
+ *
+ * @param {string} title - se inserta como texto, nunca como HTML.
+ * @param {string} bodyHtml
+ * @param {Array<{label:string, cls:string, action:Function}>} buttons
+ * @param {object} [opts]
+ * @param {string} [opts.maxWidth]
+ * @param {Function} [opts.onClose] - se llama al cerrarse, pase lo que pase
+ *   (botón, X o cierre en cascada). Es donde el modal de abajo refresca lo
+ *   que el de arriba pudo haber cambiado.
+ * @returns {HTMLElement} el overlay creado, para consultarlo con querySelector.
+ */
+export function openStackedModal(title, bodyHtml, buttons = [], { maxWidth = '', onClose } = {}) {
+  const nivel = modalStack.length + 1;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'overlay-stacked';
+  overlay.style.zIndex = String(500 + nivel * 10);
+  overlay.innerHTML = `
+    <div class="modal"${maxWidth ? ` style="max-width:${maxWidth}"` : ''}>
+      <div class="modal-hd">
+        <div class="modal-icon-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><path d="M9 22V12h6v10"/></svg>
+        </div>
+        <h2></h2>
+        <button class="modal-close" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body-stacked"></div>
+      <div class="modal-ft"></div>
+    </div>`;
+
+  overlay.querySelector('h2').textContent = title;
+  overlay.querySelector('.modal-body-stacked').innerHTML = bodyHtml;
+
+  const footer = overlay.querySelector('.modal-ft');
+  footer.innerHTML = buttons.map(b => `<button class="${b.cls}" type="button">${b.label}</button>`).join('');
+  footer.querySelectorAll('button').forEach((btn, i) =>
+    btn.addEventListener('click', buttons[i].action));
+
+  // Mismo criterio que el modal de siempre (patrón "Ventanas flotantes"): no
+  // se cierra con click afuera, para no perder lo escrito por accidente.
+  overlay.querySelector('.modal-close').addEventListener('click', () => closeStackedModal());
+
+  document.body.appendChild(overlay);
+  modalStack.push({ overlay, onClose });
+  return overlay;
+}
+
+/** Cierra el modal apilado de más arriba y devuelve el control al de abajo. */
+export function closeStackedModal() {
+  const top = modalStack.pop();
+  if (!top) return;
+  top.overlay.remove();
+  closeDateRangePopover();
+  closeLiveSearchDropdown();
+  top.onClose?.();
+}
+
+/** ¿Hay algún modal apilado abierto? */
+export function hayModalApilado() {
+  return modalStack.length > 0;
 }
 
 export function setModalMaxWidth(px) {

@@ -590,6 +590,40 @@ function wireFileSlot(slot) {
  * (MI AUDITORIA Órdenes #3c, botón "Actualizar") abre directo en esa
  * pestaña en vez de en la etapa ya alcanzada — siempre hacia adelante,
  * así que nunca dispara el aviso de "etapa anterior" de switchWizTab. */
+/**
+ * Aviso temporal de la etapa B (Fase 3): recuerda radicar la orden ante la
+ * aseguradora, nombrándola cuando se sabe cuál es. Desaparece en cuanto la
+ * solicitud queda registrada — ver `refrescarAvisoSolicitud()`.
+ *
+ * El nombre sale de la EPS del paciente activo. Si el paciente no la tiene
+ * cargada se usa una redacción genérica en vez de omitir el aviso: el
+ * recordatorio sirve igual, y decir "tu EPS" es preferible a dejar un hueco
+ * o, peor, escribir "undefined".
+ */
+function avisoSolicitudHtml() {
+  const eps = state.activePatient?.eps?.trim();
+  const ante = eps ? `ante ${esc(eps)}` : 'ante tu EPS';
+  return `<div class="info-box info-box-warn hidden" id="of-aviso-solicitud" style="margin-bottom:12px">
+    <span class="ib-icon">${Icons.alertTriangle}</span>
+    <span>Esta orden todavía no se ha radicado ${ante}. Registra abajo la fecha y el número de la solicitud cuando lo hagas — mientras tanto, la autorización no empieza a contar.</span>
+  </div>`;
+}
+
+/** ¿Ya se registró la solicitud? Basta la fecha o el número: son los dos
+ *  datos que prueban que la orden se radicó. */
+function solicitudEstaRegistrada() {
+  return !!(document.getElementById('of-sol-fecha')?.value
+    || document.getElementById('of-sol-num')?.value.trim());
+}
+
+/** Muestra u oculta el aviso según se haya llenado la solicitud. Se llama al
+ *  cargar el formulario y en cada cambio de esos campos, para que el aviso
+ *  se vaya en el momento, sin esperar a guardar. */
+function refrescarAvisoSolicitud() {
+  document.getElementById('of-aviso-solicitud')
+    ?.classList.toggle('hidden', solicitudEstaRegistrada());
+}
+
 async function openOrderWizard(id, prefill, forceTab) {
   orderFiles = { orden: null, solicitud: null, autorizacion: null };
   originalStoredPaths = [];
@@ -656,6 +690,7 @@ async function openOrderWizard(id, prefill, forceTab) {
       </div>
     </div>
     <div class="wiz-pane ${startTab === 'b' ? 'visible' : ''}" id="pane-b">
+      ${avisoSolicitudHtml()}
       <div class="info-box" style="margin-bottom:16px">Registra aquí cuando envíes la orden a la aseguradora para solicitar autorización.</div>
       <div class="form-row cols-2">
         <div class="form-field"><label class="fl">Fecha de solicitud</label><input class="fi" id="of-sol-fecha" type="date"/></div>
@@ -711,6 +746,9 @@ async function openOrderWizard(id, prefill, forceTab) {
     document.getElementById('of-followup-field').classList.toggle('hidden', e.target.value !== 'Finalizado');
   });
 
+  ['of-sol-fecha', 'of-sol-num'].forEach(fid =>
+    document.getElementById(fid).addEventListener('input', refrescarAvisoSolicitud));
+
   if (o) {
     document.getElementById('of-fecha').value = o.fechaOrden || '';
     document.getElementById('of-sol-fecha').value = o.solicitud_fecha || '';
@@ -733,6 +771,9 @@ async function openOrderWizard(id, prefill, forceTab) {
     if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
   }
   renderFilePreview('orden'); renderFilePreview('solicitud');
+  // Los `value =` de arriba no disparan 'input', así que el aviso de la
+  // etapa B se evalúa a mano una vez cargados los datos.
+  refrescarAvisoSolicitud();
 
   // Pane C (Autorización / Autorizaciones) depende del tipo de orden — se
   // arma aparte y se reconstruye si el usuario cambia el tipo en vivo
@@ -771,7 +812,6 @@ function renderPaneC(tipoOrden, o, centerOptions) {
           <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccione proveedor</option>${centerOptions}</select>
           <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar proveedor al directorio">+</button>
         </div>
-        <div id="of-centro-newform" class="hidden"></div>
       </div>
     </div>
     <div id="of-auth-rows-container" style="margin-top:6px"></div>
@@ -793,7 +833,6 @@ function renderPaneC(tipoOrden, o, centerOptions) {
           <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccione centro médico</option>${centerOptions}</select>
           <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar centro médico al directorio">+</button>
         </div>
-        <div id="of-centro-newform" class="hidden"></div>
       </div>
       <div class="form-field span2"><label class="fl">Imagen de la autorización</label>
         ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
@@ -802,7 +841,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
   `;
 
   wireFileSlot('autorizacion');
-  wireInlineNewCenter('of-auth-centro', 'of-centro-add-btn', 'of-centro-newform');
+  wireInlineNewCenter('of-auth-centro', 'of-centro-add-btn');
   renderFilePreview('autorizacion');
 
   if (isAuthTableType(tipoOrden)) {
