@@ -29,6 +29,13 @@ const FREQ_CONFIG = {
   'Dos veces al día o cada 12 horas': { rows: 2, intervalHours: 12 },
   'Tres veces al día o cada 8 horas': { rows: 3, intervalHours: 8 },
   'Cuatro veces al día o cada 6 horas': { rows: 4, intervalHours: 6 },
+  // Fase 3 (segunda tanda) — auditoría móvil 2026-07-26: dosis más frecuentes
+  // que las 4 originales (antibióticos fuertes, esquemas de insulina
+  // múltiple). Mismo patrón: generan sus horarios automáticamente espaciados.
+  'Seis veces al día o cada 4 horas': { rows: 6, intervalHours: 4 },
+  'Ocho veces al día o cada 3 horas': { rows: 8, intervalHours: 3 },
+  'Doce veces al día o cada 2 horas': { rows: 12, intervalHours: 2 },
+  'Cada hora': { rows: 24, intervalHours: 1 },
   'A demanda': { rows: 0, intervalHours: null },
 };
 const FREQ_OPTIONS = Object.keys(FREQ_CONFIG);

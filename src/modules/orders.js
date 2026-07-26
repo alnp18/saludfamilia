@@ -991,6 +991,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
       </div>
     </div>
     <div id="of-auth-rows-container" style="margin-top:6px"></div>
+    <div id="of-auth-completo-aviso"></div>
     <div class="form-row cols-2" style="margin-top:14px">
       <div class="form-field span2"><label class="fl">Imagen de la autorización (opcional)</label>
         ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
@@ -1000,6 +1001,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
       </div>
     </div>
   ` : `
+    <div class="info-box" style="margin-bottom:16px">Registra aquí la autorización que te entregó la aseguradora: el número, la vigencia y, si quieres, una foto del documento.</div>
     <div class="form-row cols-2">
       ${dateRangeFieldHtml('of-auth-vigencia', { label: 'Vigencia de la autorización', span: true })}
       <div class="form-field span2"><label class="fl">Número de autorización</label><input class="fi" id="of-auth-num" type="text" placeholder="AUT-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
@@ -1029,6 +1031,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
     }
     mesesInput.addEventListener('input', () => regenerateAuthRows(mesesInput.value));
     regenerateAuthRows(mesesInput.value);
+    document.getElementById('of-auth-finalizado').addEventListener('change', refrescarAvisoEntregasCompletas);
   } else {
     wireDateRangeField('of-auth-vigencia');
     if (o) {
@@ -1053,11 +1056,35 @@ function regenerateAuthRows(mesesValue) {
   renderAuthRowsTable();
 }
 
+/**
+ * Aviso condicional (Fase 3, segunda tanda): cuando ya se marcaron
+ * "Entregado" todos los meses de la tabla, sugiere terminar de una vez
+ * marcando la orden como finalizada — en vez de que la persona tenga que
+ * acordarse de bajar y marcar esa casilla por su cuenta.
+ *
+ * Solo se muestra con al menos una fila (una tabla vacía no está "completa",
+ * está sin datos) y desaparece apenas se destilda cualquier entrega o se
+ * finaliza la orden a mano.
+ */
+function refrescarAvisoEntregasCompletas() {
+  const cont = document.getElementById('of-auth-completo-aviso');
+  if (!cont) return;
+  const yaFinalizado = document.getElementById('of-auth-finalizado')?.checked;
+  const todasEntregadas = authRows.length > 0 && authRows.every(r => r.entregado);
+  cont.innerHTML = (todasEntregadas && !yaFinalizado)
+    ? `<div class="info-box info-box-warn" style="margin:10px 0">
+        <span class="ib-icon">${Icons.alertTriangle}</span>
+        <span>Todas las entregas de esta orden ya están marcadas. Si no falta ninguna más, marca abajo la orden como finalizada.</span>
+      </div>`
+    : '';
+}
+
 function renderAuthRowsTable() {
   const container = document.getElementById('of-auth-rows-container');
   if (!container) return;
   if (!authRows.length) {
     container.innerHTML = '<p style="font-size:12.5px;color:var(--ts);margin:0">Escribe el número de meses para generar la tabla mes a mes.</p>';
+    refrescarAvisoEntregasCompletas();
     return;
   }
   container.innerHTML = `<table class="auth-table">
@@ -1076,8 +1103,10 @@ function renderAuthRowsTable() {
       const row = authRows.find(r => r.mesNumero === Number(el.dataset.authMes));
       if (!row) return;
       row[el.dataset.authField] = el.type === 'checkbox' ? el.checked : el.value;
+      if (el.dataset.authField === 'entregado') refrescarAvisoEntregasCompletas();
     });
   });
+  refrescarAvisoEntregasCompletas();
 }
 
 /** Las etapas se navegan como páginas. Editar una etapa anterior a la ya
