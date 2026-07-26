@@ -12,7 +12,11 @@ import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRan
 // Médicos, vía src/lib/extensibleCatalog.js).
 const VIA_OPTIONS_FIJAS = ['Oral', 'Subcutánea', 'Intravenosa', 'Intramuscular', 'Tópica', 'Inhalatoria', 'Sublingual', 'Ótica', 'Oftálmica', 'Rectal', 'Nasal', 'Transdérmica', 'Vía sonda'];
 const CATEGORIA_VIA = 'via_administracion';
-const UNIDAD_OPTIONS = ['mg', 'mcg', 'g', 'ml', 'UI', 'gotas', 'cápsulas', 'tabletas', 'sobres', 'parches', 'puffs'];
+// Unidad de dosis: mismo patrón "Otra… extensible" que Vía de administración
+// — la lista fija cubre los casos comunes, pero no es exhaustiva (patrón
+// transversal de desplegables, auditoría móvil 2026-07-25).
+const UNIDAD_OPTIONS_FIJAS = ['mg', 'mcg', 'g', 'ml', 'UI', 'gotas', 'cápsulas', 'tabletas', 'sobres', 'parches', 'puffs'];
+const CATEGORIA_UNIDAD = 'unidad_medicamento';
 
 // Frecuencia: 5 opciones fijas (P1.5). Cada una define cuántas filas de
 // "Horarios de toma" se auto-generan y cada cuántas horas se espacian —
@@ -28,6 +32,7 @@ const FREQ_OPTIONS = Object.keys(FREQ_CONFIG);
 
 let medHorariosArr = []; // [{hora, dosis}]
 let pendingViaOtra = false;
+let pendingUnidadOtra = false;
 let showHistory = false;
 let showInactive = false;            // grupo colapsable de inactivos (auditoría 2026-07-17)
 let usageByMed = {};                 // { medId: { count, last, events[] } } — usos "a demanda"
@@ -376,10 +381,13 @@ function renderHorariosBuilder(freq) {
 }
 
 export async function openMedModal(id, prefill = null) {
-  let m = null, customVia;
+  let m = null, customVia, customUnidad;
   try {
     if (id) m = await api.getMed(id);
-    customVia = await api.listCatalogOptions(state.household.id, CATEGORIA_VIA);
+    [customVia, customUnidad] = await Promise.all([
+      api.listCatalogOptions(state.household.id, CATEGORIA_VIA),
+      api.listCatalogOptions(state.household.id, CATEGORIA_UNIDAD),
+    ]);
   } catch (err) {
     showToast(err.message || 'No se pudo abrir el formulario del medicamento', 'err');
     return;
@@ -394,6 +402,10 @@ export async function openMedModal(id, prefill = null) {
   pendingViaOtra = !!(m?.via && !knownVia.includes(m.via));
   const viaSelected = pendingViaOtra ? OTRA_VALUE : (m?.via || '');
 
+  const knownUnidad = [...UNIDAD_OPTIONS_FIJAS, ...customUnidad];
+  pendingUnidadOtra = !!(m?.unidad && !knownUnidad.includes(m.unidad));
+  const unidadSelected = pendingUnidadOtra ? OTRA_VALUE : (m?.unidad || '');
+
   showModal(
     isEdit ? (willVersion ? 'Editar medicamento — nueva versión' : 'Editar medicamento') : 'Nuevo medicamento',
     `<div class="form-body">
@@ -405,10 +417,11 @@ export async function openMedModal(id, prefill = null) {
         </div>
         <div class="form-field span2"><label class="fl">Indicación — enfermedad o síntoma que trata</label><input class="fi" id="mf-indicacion" type="text" placeholder="Ej: Hipertensión, diabetes tipo 2, dolor lumbar…" value="${esc(m?.indicacion || '')}"/></div>
         <div class="form-field"><label class="fl">Dosis diaria *</label><input class="fi" id="mf-dosis" type="text" placeholder="Ej: 500, 10, 0.25" value="${esc(m?.dosis || '')}"/></div>
-        <div class="form-field"><label class="fl">Unidad</label><select class="fi" id="mf-unidad">${UNIDAD_OPTIONS.map(u => `<option ${m?.unidad === u ? 'selected' : ''}>${u}</option>`).join('')}</select></div>
-        <div class="form-field span2"><label class="fl">Frecuencia</label><select class="fi" id="mf-freq"><option value="">Seleccionar…</option>${FREQ_OPTIONS.map(f => `<option ${m?.frecuencia === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
+        <div class="form-field"><label class="fl">Unidad</label><select class="fi" id="mf-unidad"><option value="">Seleccione unidad</option>${catalogOptionsHtml(UNIDAD_OPTIONS_FIJAS, customUnidad, unidadSelected)}</select></div>
+        <div class="form-field ${pendingUnidadOtra ? '' : 'hidden'}" id="mf-unidad-otra-field"><label class="fl">Especificar unidad</label><input class="fi" id="mf-unidad-otra" type="text" placeholder="Ej: ampollas" value="${esc(pendingUnidadOtra ? m.unidad : '')}"/></div>
+        <div class="form-field span2"><label class="fl">Frecuencia</label><select class="fi" id="mf-freq"><option value="">Seleccione frecuencia</option>${FREQ_OPTIONS.map(f => `<option ${m?.frecuencia === f ? 'selected' : ''}>${f}</option>`).join('')}</select></div>
         <div class="form-field span2 hidden" id="horarios-builder-wrap"><label class="fl">Horarios de toma</label><div class="horarios-builder" id="horarios-builder"></div></div>
-        <div class="form-field"><label class="fl">Vía de administración</label><select class="fi" id="mf-via"><option value="">Seleccionar…</option>${catalogOptionsHtml(VIA_OPTIONS_FIJAS, customVia, viaSelected)}</select></div>
+        <div class="form-field"><label class="fl">Vía de administración</label><select class="fi" id="mf-via"><option value="">Seleccione vía de administración</option>${catalogOptionsHtml(VIA_OPTIONS_FIJAS, customVia, viaSelected)}</select></div>
         <div class="form-field ${pendingViaOtra ? '' : 'hidden'}" id="mf-via-otra-field"><label class="fl">Especificar vía</label><input class="fi" id="mf-via-otra" type="text" placeholder="Ej: Vía intraósea" value="${esc(pendingViaOtra ? m.via : '')}"/></div>
         ${dateRangeFieldHtml('mf-vigencia', { label: 'Vigencia (fin opcional)', span: true })}
         <div class="form-field span2"><label class="fl">Observaciones</label><textarea class="fi" id="mf-obs" rows="2" placeholder="Tomar con alimentos, no suspender sin consultar…">${esc(m?.observaciones || '')}</textarea></div>
@@ -431,6 +444,10 @@ export async function openMedModal(id, prefill = null) {
     pendingViaOtra = e.target.value === OTRA_VALUE;
     document.getElementById('mf-via-otra-field').classList.toggle('hidden', !pendingViaOtra);
   });
+  document.getElementById('mf-unidad').addEventListener('change', (e) => {
+    pendingUnidadOtra = e.target.value === OTRA_VALUE;
+    document.getElementById('mf-unidad-otra-field').classList.toggle('hidden', !pendingUnidadOtra);
+  });
 
   initHorariosBuilder(m?.horarios || [], m?.frecuencia || '');
 }
@@ -446,12 +463,17 @@ async function saveMedForm(editId) {
   if (viaSel === OTRA_VALUE && !document.getElementById('mf-via-otra').value.trim()) {
     showToast('Escribe la vía de administración', 'err'); return;
   }
+  const unidadSel = document.getElementById('mf-unidad').value;
+  if (unidadSel === OTRA_VALUE && !document.getElementById('mf-unidad-otra').value.trim()) {
+    showToast('Escribe la unidad', 'err'); return;
+  }
   const via = await resolveCatalogValue(state.household.id, CATEGORIA_VIA, viaSel, document.getElementById('mf-via-otra').value);
+  const unidad = await resolveCatalogValue(state.household.id, CATEGORIA_UNIDAD, unidadSel, document.getElementById('mf-unidad-otra').value);
   const vigencia = readDateRangeField('mf-vigencia');
 
   const newData = {
     nombre, dosis,
-    unidad: document.getElementById('mf-unidad').value,
+    unidad,
     frecuencia: document.getElementById('mf-freq').value,
     horarios: medHorariosArr.filter(h => h.hora),
     via,

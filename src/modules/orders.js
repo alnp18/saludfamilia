@@ -640,13 +640,13 @@ async function openOrderWizard(id, prefill, forceTab) {
         <div class="form-field">
           <label class="fl">Médico tratante</label>
           <div style="display:flex;gap:6px">
-            <select class="fi" id="of-medico" style="flex:1"><option value="">Seleccionar médico…</option>${docOptions}</select>
+            <select class="fi" id="of-medico" style="flex:1"><option value="">Seleccione médico</option>${docOptions}</select>
             <button type="button" class="btn btn-sm btn-icon" id="of-medico-add-btn" title="Agregar médico al directorio">+</button>
           </div>
           <div id="of-medico-newform" class="hidden"></div>
         </div>
         <div class="form-field"><label class="fl">Fecha de la orden</label><input class="fi" id="of-fecha" type="date"/></div>
-        <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccionar…</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+        <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccione tipo de orden</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
         <div class="form-field span2"><label class="fl">Historia clínica</label>
           ${fileFieldHtml('orden', 'Haz clic para subir la historia clínica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
@@ -674,7 +674,7 @@ async function openOrderWizard(id, prefill, forceTab) {
         <div class="form-field">
           <label class="fl">Médico</label>
           <div style="display:flex;gap:6px">
-            <select class="fi" id="of-cita-medico" style="flex:1"><option value="">Seleccionar médico…</option>${docOptionsCita}</select>
+            <select class="fi" id="of-cita-medico" style="flex:1"><option value="">Seleccione médico</option>${docOptionsCita}</select>
             <button type="button" class="btn btn-sm btn-icon" id="of-cita-medico-add-btn" title="Agregar médico al directorio">+</button>
           </div>
           <div id="of-cita-medico-newform" class="hidden"></div>
@@ -766,7 +766,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
       <div class="form-field">
         <label class="fl">Proveedor</label>
         <div style="display:flex;gap:6px">
-          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccionar proveedor…</option>${centerOptions}</select>
+          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccione proveedor</option>${centerOptions}</select>
           <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar proveedor al directorio">+</button>
         </div>
         <div id="of-centro-newform" class="hidden"></div>
@@ -788,7 +788,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
       <div class="form-field span2">
         <label class="fl">Centro médico</label>
         <div style="display:flex;gap:6px">
-          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccionar centro…</option>${centerOptions}</select>
+          <select class="fi" id="of-auth-centro" style="flex:1"><option value="">Seleccione centro médico</option>${centerOptions}</select>
           <button type="button" class="btn btn-sm btn-icon" id="of-centro-add-btn" title="Agregar centro médico al directorio">+</button>
         </div>
         <div id="of-centro-newform" class="hidden"></div>

@@ -285,14 +285,14 @@ function openPatientModal(id) {
         <div class="form-field">
           <label class="fl">Sexo</label>
           <select class="fi" id="pf-sexo">
-            <option value="">Seleccionar…</option>
+            <option value="">Seleccione sexo</option>
             <option>Masculino</option><option>Femenino</option><option>Otro</option>
           </select>
         </div>
         <div class="form-field">
           <label class="fl">Tipo de sangre</label>
           <select class="fi" id="pf-sangre">
-            <option value="">—</option>
+            <option value="">Seleccione tipo de sangre</option>
             ${['A+','A-','B+','B-','AB+','AB-','O+','O-'].map(t => `<option>${t}</option>`).join('')}
           </select>
         </div>
@@ -320,7 +320,7 @@ function openPatientModal(id) {
         <div class="form-field">
           <label class="fl">Parentesco</label>
           <select class="fi" id="pf-ce-parentesco">
-            <option value="">Seleccionar…</option>
+            <option value="">Seleccione parentesco</option>
             ${PARENTESCO_OPTIONS.map(o => `<option>${o}</option>`).join('')}
           </select>
         </div>
@@ -568,7 +568,7 @@ async function renderPoliciesSection(patientId) {
       <div class="form-row cols-2" style="margin-top:8px">
         <div class="form-field">
           <label class="fl">Tipo de póliza</label>
-          <select class="fi" id="pf-policy-tipo">${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyTipo)}</select>
+          <select class="fi" id="pf-policy-tipo"><option value="">Seleccione tipo de póliza</option>${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyTipo)}</select>
         </div>
         <div class="form-field ${isOtra ? '' : 'hidden'}">
           <label class="fl">Especificar tipo</label>
@@ -698,6 +698,7 @@ async function renderPoliciesSection(patientId) {
 
 async function savePolicyInline(patientId) {
   const tipoSel = document.getElementById('pf-policy-tipo').value;
+  if (!tipoSel) { showToast('Selecciona el tipo de póliza', 'err'); return; }
   if (tipoSel === OTRA_VALUE && !document.getElementById('pf-policy-tipo-otra').value.trim()) {
     showToast('Escribe el tipo de póliza', 'err'); return;
   }

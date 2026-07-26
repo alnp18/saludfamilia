@@ -185,7 +185,7 @@ async function openDoctorModal(id) {
         <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido" value="${esc(d?.nombre || '')}"/></div>
         <div class="form-field span2"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="df-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Especialidad</label>
-          <select class="fi" id="df-esp"><option value="">Seleccionar…</option>${catalogOptionsHtml(SPECIALTIES, customEsp, espSelected)}</select>
+          <select class="fi" id="df-esp"><option value="">Seleccione especialidad</option>${catalogOptionsHtml(SPECIALTIES, customEsp, espSelected)}</select>
         </div>
         <div class="form-field ${pendingEspOtra ? '' : 'hidden'}" id="df-esp-otra-field">
           <label class="fl">Especificar especialidad</label>

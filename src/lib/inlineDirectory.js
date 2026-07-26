@@ -101,7 +101,7 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
         <div class="form-field span2"><input class="fi" id="${formContainerId}-nombre" type="text" placeholder="Nombre completo del médico *"/></div>
         <div class="form-field">
           <select class="fi" id="${formContainerId}-esp">
-            <option value="">Especialidad…</option>
+            <option value="">Seleccione especialidad</option>
             ${specialties.map(s => `<option>${esc(s)}</option>`).join('')}
           </select>
         </div>
