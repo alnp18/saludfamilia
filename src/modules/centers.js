@@ -3,6 +3,7 @@ import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, safeUrl } from '../lib/utils.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
 
 export async function render() {
   const container = document.getElementById('view-centers');
@@ -58,7 +59,7 @@ export async function render() {
         <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${c.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
       </div>
       ${c.tel1 ? `<div class="dir-row"><a href="tel:${esc(c.tel1)}">${esc(c.tel1)}</a>${c.tel2 ? ` · <a href="tel:${esc(c.tel2)}">${esc(c.tel2)}</a>` : ''}</div>` : ''}
-      ${c.dir ? `<div class="dir-row">${esc(c.dir)}</div>` : ''}
+      ${(c.dir || c.municipio) ? `<div class="dir-row">${esc([c.dir, c.municipio, c.departamento].filter(Boolean).join(', '))}</div>` : ''}
       ${c.email ? `<div class="dir-row"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
       ${c.web && safeUrl(c.web) ? `<div class="dir-row"><a href="${esc(safeUrl(c.web))}" target="_blank" rel="noopener noreferrer">${esc(c.web)}</a></div>` : ''}
     </div>`).join('')}
@@ -122,7 +123,8 @@ function openCenterModal(id) {
         <div class="form-field span2"><label class="fl">Nombre *</label><input class="fi" id="cf-nombre" type="text" placeholder="Nombre del centro o clínica"/></div>
         <div class="form-field"><label class="fl">Teléfono 1</label><input class="fi" id="cf-tel1" type="tel" placeholder="(+57) 601…"/></div>
         <div class="form-field"><label class="fl">Teléfono 2</label><input class="fi" id="cf-tel2" type="tel" placeholder="Opcional"/></div>
-        <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="cf-dir" type="text" placeholder="Calle, carrera, ciudad…"/></div>
+        ${geoFieldsHtml('cf')}
+        <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="cf-dir" type="text" placeholder="Calle, carrera…"/></div>
         <div class="form-field"><label class="fl">Correo</label><input class="fi" id="cf-email" type="email" placeholder="info@clinica.com"/></div>
         <div class="form-field"><label class="fl">Sitio web</label><input class="fi" id="cf-web" type="url" placeholder="https://…"/></div>
       </div>
@@ -132,10 +134,12 @@ function openCenterModal(id) {
       { label: id ? 'Guardar cambios' : 'Agregar centro', cls: 'btn btn-primary', action: () => saveCenterForm(id) },
     ]
   );
+  wireGeoFields('cf');
   if (id) api.getCenter(id).then(c => {
     document.getElementById('cf-nombre').value = c.nombre || '';
     document.getElementById('cf-tel1').value = c.tel1 || '';
     document.getElementById('cf-tel2').value = c.tel2 || '';
+    fillGeoFields('cf', c.departamento, c.municipio);
     document.getElementById('cf-dir').value = c.dir || '';
     document.getElementById('cf-email').value = c.email || '';
     document.getElementById('cf-web').value = c.web || '';
@@ -150,6 +154,7 @@ async function saveCenterForm(editId) {
     nombre,
     tel1: document.getElementById('cf-tel1').value.trim(),
     tel2: document.getElementById('cf-tel2').value.trim(),
+    ...readGeoFields('cf'),
     dir: document.getElementById('cf-dir').value.trim(),
     email: document.getElementById('cf-email').value.trim(),
     web: document.getElementById('cf-web').value.trim(),

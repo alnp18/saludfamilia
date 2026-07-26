@@ -32,6 +32,9 @@ export function rowToPatient(r) {
     eps: r.eps,
     numeroAfiliado: r.numero_afiliado,
     direccion: r.direccion,
+    // Patrón Departamento/Municipio (DANE) — auditoría móvil 2026-07-25.
+    departamento: r.departamento,
+    municipio: r.municipio,
     // Antes texto libre; ahora una estructura (nombre, parentesco, teléfonos,
     // dirección, ciudad) — ver P1.5. Puede venir null si nunca se llenó.
     contactoEmergencia: r.contacto_emergencia,
@@ -71,6 +74,7 @@ export function splitContactoLegado(str) {
   return {
     primerNombre: seg[0] || '', segundoNombre: '', primerApellido: '', segundoApellido: '',
     parentesco: '', telefono1: seg[2] || '', telefono2: '', direccion: '', ciudad: '',
+    departamento: '', municipio: '',
   };
 }
 
@@ -91,6 +95,8 @@ export function patientToRow(p, householdId) {
     eps: p.eps || null,
     numero_afiliado: p.numeroAfiliado || null,
     direccion: p.direccion || null,
+    departamento: p.departamento || null,
+    municipio: p.municipio || null,
     contacto_emergencia: contactoEmergencia,
     notas: p.notas || null,
     foto: p.foto || null,
@@ -257,6 +263,8 @@ function rowToCenter(r) {
   return {
     id: r.id, nombre: r.nombre, tel1: r.tel1, tel2: r.tel2,
     dir: r.direccion, email: r.email, web: r.web,
+    // Patrón Departamento/Municipio (DANE) — auditoría móvil 2026-07-25.
+    departamento: r.departamento, municipio: r.municipio,
     publicSourceId: r.public_source_id,
   };
 }
@@ -265,6 +273,7 @@ function centerToRow(c, householdId) {
     household_id: householdId,
     nombre: c.nombre, tel1: c.tel1 || null, tel2: c.tel2 || null,
     direccion: c.dir || null, email: c.email || null, web: c.web || null,
+    departamento: c.departamento || null, municipio: c.municipio || null,
   };
   // Procedencia (pieza A): la columna solo se escribe si el llamador trae la
   // clave — así una edición normal desde el formulario (que no la conoce) no

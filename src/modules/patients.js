@@ -10,6 +10,7 @@ import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/a
 import { openViewOverlay } from '../lib/viewModeOverlay.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { openImageCropper } from '../lib/imageCropper.js';
+import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -198,6 +199,8 @@ async function openPatientViewMode(id) {
       ${pvField('Fecha de nacimiento', patient.fechaNacimiento ? fmtDate(patient.fechaNacimiento) : '')}
       ${pvField('EPS', patient.eps)}
       ${pvField('Número de afiliado', patient.numeroAfiliado)}
+      ${pvField('Departamento', patient.departamento)}
+      ${pvField('Municipio', patient.municipio)}
       ${pvField('Dirección', patient.direccion)}
     </div>
 
@@ -208,7 +211,8 @@ async function openPatientViewMode(id) {
         ${pvField('Parentesco', ce.parentesco)}
         ${pvField('Teléfono 1', ce.telefono1)}
         ${pvField('Teléfono 2', ce.telefono2)}
-        ${pvField('Ciudad', ce.ciudad)}
+        ${pvField('Departamento', ce.departamento)}
+        ${pvField('Municipio', ce.municipio)}
         ${pvField('Dirección', ce.direccion)}
       </div>` : ''}
 
@@ -298,6 +302,7 @@ function openPatientModal(id) {
           <label class="fl">Número de afiliado</label>
           <input class="fi" id="pf-afil" type="text" placeholder="No. de afiliación" style="font-family:'JetBrains Mono',monospace"/>
         </div>
+        ${geoFieldsHtml('pf')}
         <div class="form-field span2">
           <label class="fl">Dirección de residencia</label>
           <input class="fi" id="pf-direccion" type="text" placeholder="Dirección"/>
@@ -319,7 +324,7 @@ function openPatientModal(id) {
         </div>
         <div class="form-field"><label class="fl">Teléfono 1</label><input class="fi" id="pf-ce-tel1" type="text"/></div>
         <div class="form-field"><label class="fl">Teléfono 2</label><input class="fi" id="pf-ce-tel2" type="text"/></div>
-        <div class="form-field"><label class="fl">Ciudad</label><input class="fi" id="pf-ce-ciudad" type="text"/></div>
+        ${geoFieldsHtml('pf-ce')}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="pf-ce-direccion" type="text"/></div>
       </div>
 
@@ -345,6 +350,8 @@ function openPatientModal(id) {
       { label: editing ? 'Guardar cambios' : 'Crear paciente', cls: 'btn btn-primary', action: () => savePatientForm(id) },
     ]
   );
+  wireGeoFields('pf');
+  wireGeoFields('pf-ce');
   if (id) {
     fillPatientForm(id);
     renderPoliciesSection(id);
@@ -428,6 +435,7 @@ async function fillPatientForm(id) {
   document.getElementById('pf-eps').value = p.eps || '';
   document.getElementById('pf-afil').value = p.numeroAfiliado || '';
   document.getElementById('pf-direccion').value = p.direccion || '';
+  fillGeoFields('pf', p.departamento, p.municipio);
   const ce = p.contactoEmergencia || {};
   document.getElementById('pf-ce-nombre1').value = ce.primerNombre || '';
   document.getElementById('pf-ce-nombre2').value = ce.segundoNombre || '';
@@ -436,7 +444,7 @@ async function fillPatientForm(id) {
   document.getElementById('pf-ce-parentesco').value = ce.parentesco || '';
   document.getElementById('pf-ce-tel1').value = ce.telefono1 || '';
   document.getElementById('pf-ce-tel2').value = ce.telefono2 || '';
-  document.getElementById('pf-ce-ciudad').value = ce.ciudad || '';
+  fillGeoFields('pf-ce', ce.departamento, ce.municipio);
   document.getElementById('pf-ce-direccion').value = ce.direccion || '';
   document.getElementById('pf-notas').value = p.notas || '';
 }
@@ -444,7 +452,7 @@ async function fillPatientForm(id) {
 /** true si el usuario escribió algo en cualquier campo del contacto de emergencia. */
 function contactoEmergenciaTieneDatos() {
   return ['pf-ce-nombre1', 'pf-ce-nombre2', 'pf-ce-apellido1', 'pf-ce-apellido2',
-    'pf-ce-parentesco', 'pf-ce-tel1', 'pf-ce-tel2', 'pf-ce-ciudad', 'pf-ce-direccion']
+    'pf-ce-parentesco', 'pf-ce-tel1', 'pf-ce-tel2', 'pf-ce-depto', 'pf-ce-municipio', 'pf-ce-direccion']
     .some(id => document.getElementById(id).value.trim());
 }
 
@@ -455,6 +463,7 @@ async function savePatientForm(editId) {
     showToast('El primer nombre y el primer apellido son obligatorios', 'err');
     return;
   }
+  const ceGeo = readGeoFields('pf-ce');
   const contactoEmergencia = contactoEmergenciaTieneDatos() ? {
     primerNombre: document.getElementById('pf-ce-nombre1').value.trim(),
     segundoNombre: document.getElementById('pf-ce-nombre2').value.trim(),
@@ -463,7 +472,8 @@ async function savePatientForm(editId) {
     parentesco: document.getElementById('pf-ce-parentesco').value,
     telefono1: document.getElementById('pf-ce-tel1').value.trim(),
     telefono2: document.getElementById('pf-ce-tel2').value.trim(),
-    ciudad: document.getElementById('pf-ce-ciudad').value.trim(),
+    departamento: ceGeo.departamento,
+    municipio: ceGeo.municipio,
     direccion: document.getElementById('pf-ce-direccion').value.trim(),
   } : null;
 
@@ -494,6 +504,7 @@ async function savePatientForm(editId) {
     eps: document.getElementById('pf-eps').value.trim(),
     numeroAfiliado: document.getElementById('pf-afil').value.trim(),
     direccion: document.getElementById('pf-direccion').value.trim(),
+    ...readGeoFields('pf'),
     contactoEmergencia,
     notas: document.getElementById('pf-notas').value.trim(),
     foto,
