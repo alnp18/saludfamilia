@@ -4,6 +4,7 @@ import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, safeUrl } from '../lib/utils.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
+import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 
 export async function render() {
   const container = document.getElementById('view-centers');
@@ -58,7 +59,8 @@ export async function render() {
         <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${c.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
         <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${c.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
       </div>
-      ${c.tel1 ? `<div class="dir-row"><a href="tel:${esc(c.tel1)}">${esc(c.tel1)}</a>${c.tel2 ? ` · <a href="tel:${esc(c.tel2)}">${esc(c.tel2)}</a>` : ''}</div>` : ''}
+      ${c.tel1 ? `<div class="dir-row">${esc(c.tel1)} ${callLinkHtml(c.tel1)}</div>` : ''}
+      ${c.tel2 ? `<div class="dir-row">${esc(c.tel2)} ${callLinkHtml(c.tel2)}</div>` : ''}
       ${(c.dir || c.municipio) ? `<div class="dir-row">${esc([c.dir, c.municipio, c.departamento].filter(Boolean).join(', '))}</div>` : ''}
       ${c.email ? `<div class="dir-row"><a href="mailto:${esc(c.email)}">${esc(c.email)}</a></div>` : ''}
       ${c.web && safeUrl(c.web) ? `<div class="dir-row"><a href="${esc(safeUrl(c.web))}" target="_blank" rel="noopener noreferrer">${esc(c.web)}</a></div>` : ''}
@@ -121,8 +123,8 @@ function openCenterModal(id) {
     `<div class="form-body">
       <div class="form-row cols-2">
         <div class="form-field span2"><label class="fl">Nombre *</label><input class="fi" id="cf-nombre" type="text" placeholder="Nombre del centro o clínica"/></div>
-        <div class="form-field"><label class="fl">Teléfono 1</label><input class="fi" id="cf-tel1" type="tel" placeholder="(+57) 601…"/></div>
-        <div class="form-field"><label class="fl">Teléfono 2</label><input class="fi" id="cf-tel2" type="tel" placeholder="Opcional"/></div>
+        ${phoneFieldHtml({ id: 'cf-tel1', label: 'Teléfono 1', placeholder: '(+57) 601…' })}
+        ${phoneFieldHtml({ id: 'cf-tel2', label: 'Teléfono 2', placeholder: 'Opcional' })}
         ${geoFieldsHtml('cf')}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="cf-dir" type="text" placeholder="Calle, carrera…"/></div>
         <div class="form-field"><label class="fl">Correo</label><input class="fi" id="cf-email" type="email" placeholder="info@clinica.com"/></div>

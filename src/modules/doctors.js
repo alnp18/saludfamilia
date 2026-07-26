@@ -5,6 +5,7 @@ import { esc } from '../lib/utils.js';
 import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
+import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 
 const SP_COLORS_MAP = {
   'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
@@ -90,6 +91,7 @@ export async function render() {
             <div class="doc-name">${esc(d.nombre)}${directoryTag(d, proposedMap)}</div>
             ${d.tarjetaProfesional ? `<div class="doc-tarjeta">T.P. ${esc(d.tarjetaProfesional)}</div>` : ''}
             <div class="doc-detail">${d.consultorio ? esc(d.consultorio) + ' · ' : ''}${d.centroId ? esc(centerMap[d.centroId] || '') : ''}</div>
+            ${d.tel ? `<div class="doc-detail">${esc(d.tel)} ${callLinkHtml(d.tel)}</div>` : ''}
           </div>
           ${!d.publicSourceId && !proposedMap[d.id] ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${d.id}" title="Proponer al directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${d.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
@@ -203,7 +205,7 @@ async function openDoctorModal(id) {
           <div id="df-centro-newform" class="hidden"></div>
         </div>
         <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
-        <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="df-tel" type="tel" placeholder="Número directo o extensión" value="${esc(d?.tel || '')}"/></div>
+        ${phoneFieldHtml({ id: 'df-tel', label: 'Teléfono / Ext.', placeholder: 'Número directo o extensión', value: d?.tel || '' })}
         <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="df-notas" rows="2" placeholder="Horarios, indicaciones especiales…">${esc(d?.notas || '')}</textarea></div>
       </div>
     </div>`,

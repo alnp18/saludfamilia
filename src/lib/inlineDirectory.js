@@ -2,6 +2,7 @@ import * as api from './api.js';
 import { state } from '../state.js';
 import { esc } from './utils.js';
 import { showToast } from './modal.js';
+import { callInputButtonHtml } from './phone.js';
 
 /**
  * Alta rápida de centro médico o médico "sin salir del flujo" (P1.5 —
@@ -35,7 +36,7 @@ export function wireInlineNewCenter(selectId, addBtnId, formContainerId) {
     container.innerHTML = `
       <div class="form-row cols-2" style="margin-top:8px">
         <div class="form-field span2"><input class="fi" id="${formContainerId}-nombre" type="text" placeholder="Nombre del centro o clínica *"/></div>
-        <div class="form-field"><input class="fi" id="${formContainerId}-tel1" type="tel" placeholder="Teléfono"/></div>
+        <div class="form-field"><div class="call-field"><input class="fi" id="${formContainerId}-tel1" type="tel" placeholder="Teléfono"/>${callInputButtonHtml(`${formContainerId}-tel1`)}</div></div>
         <div class="form-field"><input class="fi" id="${formContainerId}-dir" type="text" placeholder="Dirección"/></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:6px">

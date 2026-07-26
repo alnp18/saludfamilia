@@ -10,6 +10,7 @@ import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
+import { callLinkHtml } from '../lib/phone.js';
 
 const ORDER_TYPES = ['Cita de control', 'Nueva especialidad', 'Medicamentos/Insumos/Terapias', 'Examen', 'Laboratorio', 'Otro'];
 const STAGE_ORDER = ['A', 'B', 'C', 'D', 'Finalizado'];
@@ -454,7 +455,8 @@ function renderOrderReadView(o, docMap, centerMap, authList) {
         ${roField('Fecha de vencimiento', o.auth_fechaVence ? fmtDate(o.auth_fechaVence) : null)}
         ${roField('Número de autorización', o.auth_numero ? esc(o.auth_numero) : null)}
         ${roField('Centro médico', centro ? esc(centro.nombre) : null)}
-        ${centro && (centro.tel1 || centro.tel2) ? roField('Teléfono', [centro.tel1, centro.tel2].filter(Boolean).map(esc).join(' · ')) : ''}
+        ${centro && centro.tel1 ? roField('Teléfono', `${esc(centro.tel1)} ${callLinkHtml(centro.tel1)}`) : ''}
+        ${centro && centro.tel2 ? roField('Teléfono 2', `${esc(centro.tel2)} ${callLinkHtml(centro.tel2)}`) : ''}
         ${centro && centro.dir ? roField('Dirección', esc(centro.dir)) : ''}
         ${o.auth_imagen ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="autorizacion">Ver imagen</button>` : ''}
       </div>`)

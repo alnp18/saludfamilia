@@ -3,6 +3,7 @@ import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc, safeUrl } from '../lib/utils.js';
 import { Icons } from '../lib/icons.js';
+import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 import { SPECIALTIES } from './doctors.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 
@@ -186,7 +187,8 @@ function renderCentersTab(el, pubCenters, myCenters) {
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-cen="${c.id}" title="Editar entrada pública"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
           <button class="btn btn-sm btn-icon btn-danger" data-del-cen="${c.id}" title="Eliminar del directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>` : ''}
       </div>
-      ${c.tel1 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel1)}${c.tel2 ? ' · ' + esc(c.tel2) : ''}</span></div>` : ''}
+      ${c.tel1 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel1)}</span>${callLinkHtml(c.tel1)}</div>` : ''}
+      ${c.tel2 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel2)}</span>${callLinkHtml(c.tel2)}</div>` : ''}
       ${c.dir ? `<div class="dir-row">${Icons.hospital}<span>${esc(c.dir)}</span></div>` : ''}
       ${c.email ? `<div class="dir-row">${Icons.mail}<span>${esc(c.email)}</span></div>` : ''}
       ${c.web && safeUrl(c.web) ? `<div class="dir-row">${Icons.globe}<a href="${esc(safeUrl(c.web))}" target="_blank" rel="noopener noreferrer">${esc(c.web)}</a></div>` : ''}
@@ -413,7 +415,7 @@ function openPublicDoctorModal(d) {
         <div class="form-field"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="pdf-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Centro médico (texto)</label><input class="fi" id="pdf-centro" type="text" placeholder="Nombre del centro donde atiende" value="${esc(d?.centro || '')}"/></div>
         <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="pdf-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
-        <div class="form-field"><label class="fl">Teléfono / Ext.</label><input class="fi" id="pdf-tel" type="tel" placeholder="Número directo o extensión" value="${esc(d?.tel || '')}"/></div>
+        ${phoneFieldHtml({ id: 'pdf-tel', label: 'Teléfono / Ext.', placeholder: 'Número directo o extensión', value: d?.tel || '' })}
         <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="pdf-notas" rows="2" placeholder="Horarios, indicaciones…">${esc(d?.notas || '')}</textarea></div>
       </div>
     </div>`,
@@ -451,8 +453,8 @@ function openPublicCenterModal(c) {
       ${c?.estado === 'pendiente' ? '<p style="font-size:12px;color:var(--ts);margin:0 0 10px">Estás corrigiendo una propuesta pendiente: al guardar sigue pendiente, apruébala desde Revisión.</p>' : ''}
       <div class="form-row cols-2">
         <div class="form-field span2"><label class="fl">Nombre *</label><input class="fi" id="pcf-nombre" type="text" placeholder="Nombre del centro o clínica" value="${esc(c?.nombre || '')}"/></div>
-        <div class="form-field"><label class="fl">Teléfono 1</label><input class="fi" id="pcf-tel1" type="tel" placeholder="(+57) 601…" value="${esc(c?.tel1 || '')}"/></div>
-        <div class="form-field"><label class="fl">Teléfono 2</label><input class="fi" id="pcf-tel2" type="tel" placeholder="Opcional" value="${esc(c?.tel2 || '')}"/></div>
+        ${phoneFieldHtml({ id: 'pcf-tel1', label: 'Teléfono 1', placeholder: '(+57) 601…', value: c?.tel1 || '' })}
+        ${phoneFieldHtml({ id: 'pcf-tel2', label: 'Teléfono 2', placeholder: 'Opcional', value: c?.tel2 || '' })}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="pcf-dir" type="text" placeholder="Calle, carrera, ciudad…" value="${esc(c?.dir || '')}"/></div>
         <div class="form-field"><label class="fl">Correo</label><input class="fi" id="pcf-email" type="email" placeholder="info@clinica.com" value="${esc(c?.email || '')}"/></div>
         <div class="form-field"><label class="fl">Sitio web</label><input class="fi" id="pcf-web" type="url" placeholder="https://…" value="${esc(c?.web || '')}"/></div>

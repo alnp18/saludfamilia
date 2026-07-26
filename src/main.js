@@ -2,6 +2,7 @@ import * as auth from './lib/auth.js';
 import * as api from './lib/api.js';
 import { state, restoreActivePatientId, persistActivePatientId, restoreLightMode, updatePatientHeader, updateNoPatientBanner, applyPatientTheme } from './state.js';
 import { initModalOverlay, showToast } from './lib/modal.js';
+import { initCallButtons } from './lib/phone.js';
 import { wireHeader, closePatientDrop, closeMobileNav } from './modules/header.js';
 import { showLegalModal } from './lib/legal.js';
 
@@ -85,6 +86,7 @@ async function bootstrapApp() {
   document.body.classList.toggle('light-mode', state.lightMode);
 
   initModalOverlay();
+  initCallButtons();
   wireHeader({ setActivePatient, goView });
   wireSidebar();
   Dashboard.setNavigator(goView);

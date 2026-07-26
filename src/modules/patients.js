@@ -12,6 +12,7 @@ import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { openImageCropper } from '../lib/imageCropper.js';
 import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
+import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -147,6 +148,13 @@ export async function render() {
     el.addEventListener('click', (e) => { e.stopPropagation(); deletePatient(el.dataset.deleteId); }));
 }
 
+/** Igual que pvField, pero agrega el botón Llamar junto al número. */
+function pvPhoneField(label, value) {
+  if (!value) return '';
+  return `<div class="pv-field"><div class="pv-field-label">${esc(label)}</div>`
+    + `<div class="pv-field-value">${esc(value)} ${callLinkHtml(value)}</div></div>`;
+}
+
 function pvField(label, value) {
   if (value === null || value === undefined || value === '') return '';
   return `<div class="pv-field"><div class="pv-field-label">${esc(label)}</div><div class="pv-field-value">${esc(value)}</div></div>`;
@@ -211,8 +219,8 @@ async function openPatientViewMode(id) {
       <div class="pv-field-row">
         ${pvField('Nombre', ceNombre)}
         ${pvField('Parentesco', ce.parentesco)}
-        ${pvField('Teléfono 1', ce.telefono1)}
-        ${pvField('Teléfono 2', ce.telefono2)}
+        ${pvPhoneField('Teléfono 1', ce.telefono1)}
+        ${pvPhoneField('Teléfono 2', ce.telefono2)}
         ${pvField('Departamento', ce.departamento)}
         ${pvField('Municipio', ce.municipio)}
         ${pvField('Dirección', ce.direccion)}
@@ -324,8 +332,8 @@ function openPatientModal(id) {
             ${PARENTESCO_OPTIONS.map(o => `<option>${o}</option>`).join('')}
           </select>
         </div>
-        <div class="form-field"><label class="fl">Teléfono 1</label><input class="fi" id="pf-ce-tel1" type="text"/></div>
-        <div class="form-field"><label class="fl">Teléfono 2</label><input class="fi" id="pf-ce-tel2" type="text"/></div>
+        ${phoneFieldHtml({ id: 'pf-ce-tel1', label: 'Teléfono 1' })}
+        ${phoneFieldHtml({ id: 'pf-ce-tel2', label: 'Teléfono 2' })}
         ${geoFieldsHtml('pf-ce')}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="pf-ce-direccion" type="text"/></div>
       </div>
