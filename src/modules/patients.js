@@ -14,6 +14,8 @@ import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../l
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 import { coincideAprox } from '../lib/searchSources.js';
+import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch } from '../lib/liveSearch.js';
+import { buscarSintomas } from '../lib/searches.js';
 
 let setActivePatientCb = null;
 export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
@@ -983,16 +985,21 @@ async function renderDiagnosesSection(patientId) {
       ${listHtml || '<p style="font-size:12.5px;color:var(--ts);margin:4px 0 0">Sin diagnósticos registrados.</p>'}
       ${cronicoAddOpen ? `
         <div class="form-row cols-2" style="margin-top:8px">
+          ${liveSearchFieldHtml('pf-diag', {
+            label: 'Buscar enfermedad o síntoma',
+            placeholder: 'Ej: presión alta, diabetes, asma…',
+            span: true,
+            hint: 'Búscalo como lo dices normalmente; se completa el código solo. También puedes escribir el código a mano abajo.',
+          })}
           <div class="form-field">
             <label class="fl">Código CIE10</label>
-            <input class="fi" id="pf-diag-codigo" type="text" placeholder="Ej: E11.9" style="font-family:'JetBrains Mono',monospace" value="${editingDiagnosis ? esc(editingDiagnosis.codigoCie10) : ''}"/>
+            <input class="fi" id="pf-diag-codigo" type="text" placeholder="Ej: E11" style="font-family:'JetBrains Mono',monospace" value="${editingDiagnosis ? esc(editingDiagnosis.codigoCie10) : ''}"/>
           </div>
           <div class="form-field">
             <label class="fl">Descripción (opcional)</label>
             <input class="fi" id="pf-diag-desc" type="text" placeholder="Ej: Diabetes tipo 2" value="${editingDiagnosis ? esc(editingDiagnosis.descripcion || '') : ''}"/>
           </div>
         </div>
-        <p style="font-size:11.5px;color:var(--tm);margin:6px 0 0">Búsqueda por nombre o código: pendiente (requiere definir la fuente de datos CIE10). Por ahora se ingresa el código manualmente.</p>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button type="button" class="btn btn-sm btn-primary" id="pf-diag-save-btn">${editingDiagnosis ? 'Guardar cambios' : 'Agregar diagnóstico'}</button>
           <button type="button" class="btn btn-sm" id="pf-diag-cancel-btn">Cancelar</button>
@@ -1020,6 +1027,22 @@ async function renderDiagnosesSection(patientId) {
 
   if (cronicoSectionOpen) {
     if (cronicoAddOpen) {
+      // Elegir de la lista rellena código y descripción, pero ambos siguen
+      // siendo editables: la tabla que viaja con la app es un subconjunto
+      // curado, así que quien tenga el código exacto del diagnóstico debe
+      // poder corregirlo o escribirlo directamente.
+      wireLiveSearch('pf-diag', {
+        buscar: (q) => buscarSintomas(q, patientId),
+        permitirLibre: true,
+        textoLibre: 'Usar',
+        onSelect: (sel) => {
+          if (!sel) return;
+          const codigo = sel.id?.startsWith('cie10:') ? sel.id.slice('cie10:'.length) : '';
+          if (codigo) document.getElementById('pf-diag-codigo').value = codigo;
+          document.getElementById('pf-diag-desc').value = sel.label || '';
+        },
+      });
+      fillLiveSearch('pf-diag', { label: editingDiagnosis?.descripcion || '' });
       document.getElementById('pf-diag-save-btn').addEventListener('click', () => saveDiagnosisInline(patientId));
       document.getElementById('pf-diag-cancel-btn').addEventListener('click', () => {
         cronicoAddOpen = false;

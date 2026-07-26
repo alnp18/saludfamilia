@@ -7,7 +7,8 @@ import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
 import { dateRangeFieldHtml, wireDateRangeField, fillDateRangeField, readDateRangeField } from '../lib/dateRange.js';
 import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch, readLiveSearch } from '../lib/liveSearch.js';
-import { buscarMedicamentos } from '../lib/searches.js';
+import { buscarMedicamentos, buscarSintomas } from '../lib/searches.js';
+import { normalizar } from '../lib/searchSources.js';
 
 // Vía de administración: fijas + "Otra…" extensible (ver nota transversal
 // del plan — mismo patrón que Pólizas en Pacientes y Especialidad en
@@ -422,7 +423,12 @@ export async function openMedModal(id, prefill = null) {
         <div class="form-field span2">
           <label class="ck-row"><input type="checkbox" id="mf-controlado" ${m?.controlado ? 'checked' : ''}/> <span>Medicamento controlado</span></label>
         </div>
-        <div class="form-field span2"><label class="fl">Indicación — enfermedad o síntoma que trata</label><input class="fi" id="mf-indicacion" type="text" placeholder="Ej: Hipertensión, diabetes tipo 2, dolor lumbar…" value="${esc(m?.indicacion || '')}"/></div>
+        ${liveSearchFieldHtml('mf-indic', {
+          label: 'Indicación — enfermedad o síntoma que trata',
+          placeholder: 'Ej: presión alta, diabetes, dolor de espalda…',
+          span: true,
+          hint: 'Puedes escribirlo como lo dices normalmente. Si no aparece en la lista, escríbelo y se guarda igual.',
+        })}
         <div class="form-field"><label class="fl">Dosis diaria *</label><input class="fi" id="mf-dosis" type="text" placeholder="Ej: 500, 10, 0.25" value="${esc(m?.dosis || '')}"/></div>
         <div class="form-field"><label class="fl">Unidad</label><select class="fi" id="mf-unidad"><option value="">Seleccione unidad</option>${catalogOptionsHtml(UNIDAD_OPTIONS_FIJAS, customUnidad, unidadSelected)}</select></div>
         <div class="form-field ${pendingUnidadOtra ? '' : 'hidden'}" id="mf-unidad-otra-field"><label class="fl">Especificar unidad</label><input class="fi" id="mf-unidad-otra" type="text" placeholder="Ej: ampollas" value="${esc(pendingUnidadOtra ? m.unidad : '')}"/></div>
@@ -449,6 +455,16 @@ export async function openMedModal(id, prefill = null) {
     textoLibre: 'Registrar',
   });
   fillLiveSearch('mf-med', { label: m?.nombre || prefill?.nombre || '' });
+
+  wireLiveSearch('mf-indic', {
+    buscar: (q) => buscarSintomas(q),
+    // Igual que el nombre del medicamento: la lista es una ayuda, no una
+    // camisa de fuerza. Nadie puede quedarse sin registrar una indicación
+    // porque no esté en la tabla.
+    permitirLibre: true,
+    textoLibre: 'Usar',
+  });
+  fillLiveSearch('mf-indic', { label: m?.indicacion || '' });
 
   wireDateRangeField('mf-vigencia');
   fillDateRangeField('mf-vigencia', m?.fechaInicio || (!m ? today() : ''), m?.fechaFin || '');
@@ -494,7 +510,11 @@ async function saveMedForm(editId) {
     frecuencia: document.getElementById('mf-freq').value,
     horarios: medHorariosArr.filter(h => h.hora),
     via,
-    indicacion: document.getElementById('mf-indicacion').value.trim(),
+    // Solo el texto: la indicación se guarda como se lee. El código CIE-10
+    // que pueda traer la opción elegida es una ayuda para estandarizar el
+    // nombre, no un dato que esta tabla almacene (sí lo hace la sección de
+    // condiciones crónicas del paciente, que tiene columna propia).
+    indicacion: readLiveSearch('mf-indic').texto,
     controlado: document.getElementById('mf-controlado').checked,
     fechaInicio: vigencia.inicio,
     fechaFin: vigencia.fin,
@@ -578,7 +598,56 @@ export async function openMedUsoModal(medId, onDone) {
   renderUsoModal(m, eventos, onDone);
 }
 
+/**
+ * Motivos que ya se registraron para este medicamento, del más reciente al
+ * más viejo y sin repetir — Fase 3, desplegable "Cómo se ha usado".
+ *
+ * Las opciones salen del propio historial y no de un catálogo del household
+ * (como sí hacen Vía o Unidad): un motivo de uso es específico del
+ * medicamento — "subida de tensión" no tiene sentido ofrecerlo al registrar
+ * un analgésico. La indicación del medicamento se suma de primera porque es
+ * la razón por la que existe la fórmula, y suele ser la respuesta.
+ */
+function motivosPrevios(m, eventos) {
+  const vistos = new Set();
+  const opciones = [];
+  const agregar = (razon) => {
+    const texto = (razon || '').trim();
+    if (!texto) return;
+    const clave = normalizar(texto);
+    if (vistos.has(clave)) return;
+    vistos.add(clave);
+    opciones.push(texto);
+  };
+  agregar(m.indicacion);
+  // `eventos` viene del más viejo al más nuevo; se recorre al revés para que
+  // lo último que se usó quede arriba, que es lo más probable que se repita.
+  [...eventos].reverse().forEach(e => agregar(e.razon));
+  return opciones;
+}
+
 function renderUsoModal(m, eventos, onDone) {
+  const motivos = motivosPrevios(m, eventos);
+  // Sin historial no se muestra el desplegable: un <select> cuya única
+  // opción es "Por otro motivo…" no ofrece nada, solo un clic de más.
+  const campoRazonHtml = motivos.length ? `
+      <div class="form-field">
+        <label class="fl">¿Por qué se usó ahora? *</label>
+        <select class="fi" id="uso-razon-sel">
+          <option value="">Seleccione el motivo</option>
+          ${motivos.map(o => `<option>${esc(o)}</option>`).join('')}
+          <option value="${OTRA_VALUE}">Por otro motivo…</option>
+        </select>
+      </div>
+      <div class="form-field hidden" id="uso-razon-otra-field">
+        <label class="fl">¿Cuál fue el motivo? *</label>
+        <textarea class="fi" id="uso-razon" rows="3" placeholder="Ej: Subida de tensión 145/95, crisis convulsiva de más de 3 min, dolor agudo en el pecho, glucosa alta 240…"></textarea>
+      </div>` : `
+      <div class="form-field">
+        <label class="fl">¿Por qué se usó ahora? *</label>
+        <textarea class="fi" id="uso-razon" rows="3" placeholder="Ej: Subida de tensión 145/95, crisis convulsiva de más de 3 min, dolor agudo en el pecho, glucosa alta 240…"></textarea>
+      </div>`;
+
   const listaHtml = eventos.length ? `
     <div class="uso-list">
       <div class="fl" style="margin-bottom:6px">Usos registrados (${eventos.length})</div>
@@ -594,11 +663,8 @@ function renderUsoModal(m, eventos, onDone) {
   showModal(
     'Registrar uso — ' + m.nombre,
     `<div class="form-body">
-      <div class="form-field">
-        <label class="fl">¿Por qué se usó ahora? *</label>
-        <textarea class="fi" id="uso-razon" rows="3" placeholder="Ej: Subida de tensión 145/95, crisis convulsiva de más de 3 min, dolor agudo en el pecho, glucosa alta 240…"></textarea>
-        <p style="font-size:11px;color:var(--tm);margin:5px 0 0">Se guarda con la fecha y hora actuales.</p>
-      </div>
+      ${campoRazonHtml}
+      <p style="font-size:11px;color:var(--tm);margin:5px 0 0">Se guarda con la fecha y hora actuales.</p>
       ${listaHtml}
     </div>`,
     [
@@ -608,12 +674,27 @@ function renderUsoModal(m, eventos, onDone) {
   );
   document.querySelectorAll('[data-del-uso]').forEach(b =>
     b.addEventListener('click', () => deleteUso(b.dataset.delUso, m.id, onDone)));
-  setTimeout(() => document.getElementById('uso-razon')?.focus(), 50);
+
+  const sel = document.getElementById('uso-razon-sel');
+  sel?.addEventListener('change', () => {
+    const otra = sel.value === OTRA_VALUE;
+    document.getElementById('uso-razon-otra-field').classList.toggle('hidden', !otra);
+    if (otra) document.getElementById('uso-razon').focus();
+  });
+  setTimeout(() => (sel || document.getElementById('uso-razon'))?.focus(), 50);
+}
+
+/** Motivo elegido: la opción del desplegable, o lo escrito si se eligió
+ *  "Por otro motivo…" (o si no había desplegable por falta de historial). */
+function leerRazonUso() {
+  const sel = document.getElementById('uso-razon-sel');
+  if (sel && sel.value !== OTRA_VALUE) return sel.value.trim();
+  return document.getElementById('uso-razon')?.value.trim() || '';
 }
 
 async function saveUso(medId, onDone) {
-  const razon = document.getElementById('uso-razon').value.trim();
-  if (!razon) { showToast('Escribe brevemente la razón del uso', 'err'); return; }
+  const razon = leerRazonUso();
+  if (!razon) { showToast('Indica por qué se usó el medicamento', 'err'); return; }
   try {
     await api.addMedUsageEvent({ medicationId: medId, razon }, state.household.id, state.activePatient.id);
     showToast('Uso registrado');

@@ -1,6 +1,7 @@
 import * as api from './api.js';
 import { state } from '../state.js';
 import { cachedLoader, filtrarLocal, combinarFuentes, normalizar } from './searchSources.js';
+import CIE10_COMUNES from './data/cie10-comunes.json';
 
 /**
  * Búsquedas concretas de la app — auditoría móvil 2026-07-25, Fase 1.
@@ -167,5 +168,103 @@ export async function buscarMedicamentos(query, patientId) {
       },
     },
     { remota: true, buscar: () => buscarEnInvima(query) },
+  ], query);
+}
+
+// ─────────────────────────────────────────
+// Síntomas / enfermedades
+// ─────────────────────────────────────────
+
+/**
+ * Tabla CIE-10 en lenguaje corriente — auditoría móvil 2026-07-26, Fase 3.
+ *
+ * El CIE-10 oficial es vocabulario clínico: quien busca "dolor de cabeza" no
+ * encuentra "R51 Cefalea", que es justo el problema que bloqueó esta tarea en
+ * Fase 1. Por eso cada entrada trae `sinonimos` en la forma en que la gente
+ * lo dice de verdad ("presión alta", "agrieras", "gripa"), y se busca contra
+ * esos sinónimos además del título oficial.
+ *
+ * OJO — es un subconjunto curado (76 entradas de motivos frecuentes en
+ * atención familiar), no el CIE-10 completo (~14.000 códigos), y usa códigos
+ * de categoría de 3 caracteres, no el subcódigo de 4. Se eligió así a
+ * propósito: la categoría es inequívoca, mientras que afinar el cuarto
+ * carácter sin la tabla oficial delante es justamente donde se cometen
+ * errores de codificación. Cargar la tabla oficial del SISPRO después no
+ * requiere tocar código: basta reemplazar el JSON respetando el formato
+ * `{ codigo, titulo, sinonimos[] }`.
+ *
+ * Y en cualquier caso el campo admite texto libre: el código es una ayuda
+ * para estandarizar, nunca un requisito.
+ */
+const CIE10_INDEX = CIE10_COMUNES.map(e => ({
+  ...e,
+  // Un solo campo con todo lo buscable, porque `filtrarLocal` compara contra
+  // propiedades sueltas y los sinónimos son un arreglo.
+  _buscable: [e.codigo, e.titulo, ...e.sinonimos].join(' '),
+}));
+
+function buscarEnCie10(query) {
+  return filtrarLocal(CIE10_INDEX, query, ['_buscable'])
+    .slice(0, 15)
+    .map(e => ({
+      id: `cie10:${e.codigo}`,
+      label: e.titulo,
+      sub: e.codigo,
+      etiqueta: 'CIE-10',
+      item: { codigo: e.codigo, titulo: e.titulo },
+    }));
+}
+
+/**
+ * Busca síntomas o enfermedades: primero lo que la propia familia ya
+ * escribió y después la tabla CIE-10 en lenguaje corriente.
+ *
+ * Lo propio va primero por la misma razón que en médicos y medicamentos: es
+ * el vocabulario que esta familia usa y el que va a repetir. Las dos fuentes
+ * son locales —la tabla viaja con la app—, así que esta búsqueda funciona
+ * completa sin conexión, a diferencia de la de medicamentos.
+ *
+ * @param {string} query
+ * @param {string} [patientId] - por omisión, el paciente activo.
+ */
+export async function buscarSintomas(query, patientId) {
+  const id = patientId || state.activePatient?.id;
+  return combinarFuentes([
+    {
+      buscar: async () => {
+        if (!id) return [];
+        // Las tres cosas que ya escribió la familia sobre por qué se trata a
+        // este paciente: la indicación de cada medicamento, el motivo de cada
+        // uso puntual y la descripción de los diagnósticos crónicos.
+        const [meds, usos, diagnosticos] = await Promise.all([
+          api.listMedsByPatient(id).catch(() => []),
+          api.listMedUsageByPatient(id).catch(() => []),
+          api.listPatientDiagnoses(id).catch(() => []),
+        ]);
+        const textos = [
+          ...meds.map(m => ({ texto: m.indicacion, origen: 'Indicación' })),
+          ...usos.map(u => ({ texto: u.razon, origen: 'Uso registrado' })),
+          ...diagnosticos.map(d => ({ texto: d.descripcion, origen: 'Diagnóstico', codigo: d.codigoCie10 })),
+        ].filter(t => t.texto);
+
+        const vistos = new Set();
+        return textos
+          .filter(t => {
+            const k = normalizar(t.texto);
+            if (vistos.has(k)) return false;
+            vistos.add(k);
+            return true;
+          })
+          .filter(t => filtrarLocal([t], query, ['texto']).length)
+          .map(t => ({
+            id: `propio:${normalizar(t.texto)}`,
+            label: t.texto,
+            sub: t.codigo || '',
+            etiqueta: t.origen,
+            item: t,
+          }));
+      },
+    },
+    { buscar: async () => buscarEnCie10(query) },
   ], query);
 }
