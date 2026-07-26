@@ -31,6 +31,9 @@ export function rowToPatient(r) {
     tipoSangre: r.tipo_sangre,
     eps: r.eps,
     numeroAfiliado: r.numero_afiliado,
+    // Identificación (RCN/TI/CC/CE) — auditoría móvil 2026-07-26, Fase 2.
+    tipoDocumento: r.tipo_documento,
+    numeroDocumento: r.numero_documento,
     direccion: r.direccion,
     // Patrón Departamento/Municipio (DANE) — auditoría móvil 2026-07-25.
     departamento: r.departamento,
@@ -94,6 +97,8 @@ export function patientToRow(p, householdId) {
     tipo_sangre: p.tipoSangre || null,
     eps: p.eps || null,
     numero_afiliado: p.numeroAfiliado || null,
+    tipo_documento: p.tipoDocumento || null,
+    numero_documento: p.numeroDocumento || null,
     direccion: p.direccion || null,
     departamento: p.departamento || null,
     municipio: p.municipio || null,

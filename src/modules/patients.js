@@ -30,6 +30,16 @@ const PARENTESCO_OPTIONS = [
   'Madre/Padre', 'Pareja/Cónyuge', 'Hijo/Hija', 'Hermano/Hermana', 'Abuela/Abuelo', 'Nieto/Nieta',
   'Tío/Tía', 'Sobrino/Sobrina', 'Cuidador', 'Familiar', 'Representante asignado', 'Otro',
 ];
+// Tipos de documento de identidad (Fase 2 — auditoría móvil 2026-07-26). Solo
+// los relevantes para un paciente familiar (no aplica NIT, de personas
+// jurídicas). CC/TI/RCN son estrictamente numéricos; CE puede traer letras
+// (documentos extranjeros), así que solo ese tipo se exime de la validación.
+const TIPO_DOCUMENTO_OPTIONS = [
+  { value: 'RC', label: 'Registro Civil de Nacimiento' },
+  { value: 'TI', label: 'Tarjeta de Identidad' },
+  { value: 'CC', label: 'Cédula de Ciudadanía' },
+  { value: 'CE', label: 'Cédula de Extranjería' },
+];
 
 // Estado del sub-formulario "Agregar/Editar póliza" dentro del modal de
 // ficha de paciente. Es un solo modal (ver modal.js), así que este
@@ -89,6 +99,17 @@ export async function render() {
     return;
   }
   document.getElementById('sb-badge-patients').textContent = patients.length;
+
+  // Orden de la tarjetas (Fase 2 — auditoría móvil 2026-07-26): el paciente
+  // activo siempre primero, y el resto alfabético por nombre completo. Una
+  // sola lista continua, sin encabezado que separe "activo" del resto — el
+  // API ya trae los pacientes ordenados por nombre, así que solo hace falta
+  // sacar el activo y ponerlo adelante.
+  const activeId = state.activePatient?.id;
+  if (activeId) {
+    const i = patients.findIndex(p => p.id === activeId);
+    if (i > 0) patients = [patients[i], ...patients.slice(0, i), ...patients.slice(i + 1)];
+  }
 
   if (!patients.length) {
     grid.innerHTML = emptyStateHtml({
@@ -204,6 +225,7 @@ async function openPatientViewMode(id) {
 
     <div class="pv-section-title">Datos personales</div>
     <div class="pv-field-row">
+      ${pvField('Documento', patient.numeroDocumento ? `${patient.tipoDocumento ? patient.tipoDocumento + ' ' : ''}${patient.numeroDocumento}` : '')}
       ${pvField('Fecha de nacimiento', patient.fechaNacimiento ? fmtDate(patient.fechaNacimiento) : '')}
       ${pvField('EPS', patient.eps)}
       ${pvField('Número de afiliado', patient.numeroAfiliado)}
@@ -285,6 +307,17 @@ function openPatientModal(id) {
         <div class="form-field"><label class="fl">Primer apellido *</label><input class="fi" id="pf-apellido1" type="text"/></div>
         <div class="form-field"><label class="fl">Segundo apellido</label><input class="fi" id="pf-apellido2" type="text"/></div>
         <div class="form-field">
+          <label class="fl">Tipo de documento</label>
+          <select class="fi" id="pf-tipo-doc">
+            <option value="">Seleccione tipo de documento</option>
+            ${TIPO_DOCUMENTO_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-field">
+          <label class="fl">Número de documento</label>
+          <input class="fi" id="pf-numero-doc" type="text" style="font-family:'JetBrains Mono',monospace"/>
+        </div>
+        <div class="form-field">
           <label class="fl">Fecha de nacimiento</label>
           <input class="fi" id="pf-dob" type="date"/>
         </div>
@@ -332,8 +365,8 @@ function openPatientModal(id) {
         </div>
         ${phoneFieldHtml({ id: 'pf-ce-tel1', label: 'Teléfono 1' })}
         ${phoneFieldHtml({ id: 'pf-ce-tel2', label: 'Teléfono 2' })}
-        ${geoFieldsHtml('pf-ce')}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="pf-ce-direccion" type="text"/></div>
+        ${geoFieldsHtml('pf-ce')}
       </div>
 
       <div class="form-section-title">Pólizas de seguro adicionales</div>
@@ -442,6 +475,8 @@ async function fillPatientForm(id) {
   document.getElementById('pf-sangre').value = p.tipoSangre || '';
   document.getElementById('pf-eps').value = p.eps || '';
   document.getElementById('pf-afil').value = p.numeroAfiliado || '';
+  document.getElementById('pf-tipo-doc').value = p.tipoDocumento || '';
+  document.getElementById('pf-numero-doc').value = p.numeroDocumento || '';
   document.getElementById('pf-direccion').value = p.direccion || '';
   fillGeoFields('pf', p.departamento, p.municipio);
   const ce = p.contactoEmergencia || {};
@@ -469,6 +504,14 @@ async function savePatientForm(editId) {
   const primerApellido = document.getElementById('pf-apellido1').value.trim();
   if (!primerNombre || !primerApellido) {
     showToast('El primer nombre y el primer apellido son obligatorios', 'err');
+    return;
+  }
+  const tipoDocumento = document.getElementById('pf-tipo-doc').value;
+  const numeroDocumento = document.getElementById('pf-numero-doc').value.trim();
+  // Solo CE admite letras (documentos extranjeros); el resto de tipos son
+  // estrictamente numéricos.
+  if (numeroDocumento && tipoDocumento !== 'CE' && !/^\d+$/.test(numeroDocumento)) {
+    showToast('El número de documento debe ser solo numérico', 'err');
     return;
   }
   const ceGeo = readGeoFields('pf-ce');
@@ -511,6 +554,8 @@ async function savePatientForm(editId) {
     tipoSangre: document.getElementById('pf-sangre').value,
     eps: document.getElementById('pf-eps').value.trim(),
     numeroAfiliado: document.getElementById('pf-afil').value.trim(),
+    tipoDocumento,
+    numeroDocumento,
     direccion: document.getElementById('pf-direccion').value.trim(),
     ...readGeoFields('pf'),
     contactoEmergencia,
