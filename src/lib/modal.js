@@ -73,8 +73,12 @@ export function setModalMaxWidth(px) {
 }
 
 export function initModalOverlay() {
-  document.getElementById('overlay').addEventListener('click', e => {
-    if (e.target === document.getElementById('overlay')) closeModal();
-  });
+  // Patrón "Ventanas flotantes" (auditoría móvil 2026-07-25): los modales de
+  // creación/edición (Pacientes, Médicos, Centros, Medicamentos, Órdenes,
+  // Pólizas — todos comparten este único overlay) NO se cierran con un click
+  // afuera. Es fácil perder sin querer varios campos ya llenados con un
+  // click accidental fuera del modal; el cierre queda solo en manos de un
+  // control explícito: el botón X de la esquina superior, o el botón
+  // "Cancelar"/equivalente de cada formulario (que ya llama a closeModal()).
   document.querySelector('.modal-close')?.addEventListener('click', closeModal);
 }
