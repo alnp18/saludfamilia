@@ -7,6 +7,7 @@ import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 import { SPECIALTIES } from './doctors.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { copiarMedicoPublico } from '../lib/inlineDirectory.js';
+import { multiClickButtonHtml, wireMultiClickButton, readMultiClickButtonState } from '../lib/multiClickButton.js';
 
 /**
  * Directorio público auditado (pieza A de arquitectura).
@@ -46,10 +47,10 @@ export async function render() {
   `;
 
   const el = document.getElementById('dir-content');
-  let pubDocs, pubCenters, myDocs, myCenters, mine, pendDocs, pendCenters;
+  let pubDocs, pubCenters, myDocs, myCenters, mine, pendDocs, pendCenters, cambios;
   try {
     if (isAdmin === null) isAdmin = await api.isDirectoryAdmin();
-    [pubDocs, pubCenters, myDocs, myCenters, mine, pendDocs, pendCenters] = await Promise.all([
+    [pubDocs, pubCenters, myDocs, myCenters, mine, pendDocs, pendCenters, cambios] = await Promise.all([
       api.listPublicDoctors('publicado'),
       api.listPublicCenters('publicado'),
       api.listDoctors(state.household.id),
@@ -57,6 +58,7 @@ export async function render() {
       api.listMyProposals(state.user.id),
       isAdmin ? api.listPublicDoctors('pendiente') : Promise.resolve([]),
       isAdmin ? api.listPublicCenters('pendiente') : Promise.resolve([]),
+      isAdmin ? api.listChangeProposals('pendiente') : Promise.resolve([]),
     ]);
   } catch (err) {
     showToast(err.message || 'No se pudo cargar el directorio público', 'err');
@@ -67,8 +69,25 @@ export async function render() {
 
   if (activeTab === 'review' && !isAdmin) activeTab = 'doctors';
 
+  // Destinos de las correcciones: casi siempre ya están en las listas de
+  // publicados que se acaban de cargar. Solo se consulta lo que falte —
+  // una entrada puede haber dejado de estar publicada después de que
+  // alguien propusiera corregirla.
+  const targetsById = new Map([...pubDocs, ...pubCenters].map(x => [x.id, x]));
+  const faltantes = [...new Set(cambios.map(c => c.targetId))].filter(id => !targetsById.has(id));
+  if (faltantes.length) {
+    try {
+      const [docs, cens] = await Promise.all([
+        api.getPublicDoctorsByIds(faltantes),
+        api.getPublicCentersByIds(faltantes),
+      ]);
+      [...docs, ...cens].forEach(x => targetsById.set(x.id, x));
+    } catch { /* lo que no se pueda resolver simplemente no se lista */ }
+  }
+
   // ── Pestañas ──
-  const pendCount = pendDocs.length + pendCenters.length;
+  const cambiosCount = new Set(cambios.map(c => c.targetId)).size;
+  const pendCount = pendDocs.length + pendCenters.length + cambiosCount;
   const myCount = mine.doctors.length + mine.centers.length;
   const pill = (key, label, count) => `
     <div class="filter-pill ${activeTab === key ? 'active' : ''}" data-dir-tab="${key}">
@@ -96,7 +115,7 @@ export async function render() {
   if (activeTab === 'doctors') renderDoctorsTab(el, pubDocs, myDocs);
   else if (activeTab === 'centers') renderCentersTab(el, pubCenters, myCenters);
   else if (activeTab === 'mine') renderMineTab(el, mine);
-  else renderReviewTab(el, pendDocs, pendCenters);
+  else renderReviewTab(el, pendDocs, pendCenters, cambios, targetsById);
 }
 
 // ─────────────────────────────────────────
@@ -144,7 +163,8 @@ function renderDoctorsTab(el, pubDocs, myDocs) {
             : `<button class="btn btn-sm" data-copy-doc="${d.id}" title="Copiar a tu directorio de Médicos (podrás editarlo libremente)">Copiar</button>`}
           ${isAdmin ? `
             <button class="btn btn-sm btn-icon btn-ghost" data-edit-doc="${d.id}" title="Editar entrada pública"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
-            <button class="btn btn-sm btn-icon btn-danger" data-del-doc="${d.id}" title="Eliminar del directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>` : ''}
+            <button class="btn btn-sm btn-icon btn-danger" data-del-doc="${d.id}" title="Eliminar del directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>`
+          : `<button class="btn btn-sm btn-icon btn-ghost" data-fix-doc="${d.id}" title="Proponer una corrección a estos datos"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/><path stroke-linecap="round" d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg></button>`}
         </div>`).join('')}
       </div>
     </div>`).join('');
@@ -155,6 +175,8 @@ function renderDoctorsTab(el, pubDocs, myDocs) {
     openPublicDoctorModal(pubDocs.find(d => d.id === b.dataset.editDoc))));
   el.querySelectorAll('[data-del-doc]').forEach(b => b.addEventListener('click', () =>
     adminDeleteConfirm('doctor', b.dataset.delDoc)));
+  el.querySelectorAll('[data-fix-doc]').forEach(b => b.addEventListener('click', () =>
+    openProposeChangesModal('doctor', pubDocs.find(d => d.id === b.dataset.fixDoc))));
 }
 
 // ─────────────────────────────────────────
@@ -186,7 +208,8 @@ function renderCentersTab(el, pubCenters, myCenters) {
           : `<button class="btn btn-sm" data-copy-cen="${c.id}" title="Copiar a tu directorio de Centros médicos (podrás editarlo libremente)">Copiar</button>`}
         ${isAdmin ? `
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-cen="${c.id}" title="Editar entrada pública"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
-          <button class="btn btn-sm btn-icon btn-danger" data-del-cen="${c.id}" title="Eliminar del directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>` : ''}
+          <button class="btn btn-sm btn-icon btn-danger" data-del-cen="${c.id}" title="Eliminar del directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>`
+        : `<button class="btn btn-sm btn-icon btn-ghost" data-fix-cen="${c.id}" title="Proponer una corrección a estos datos"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/><path stroke-linecap="round" d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4z"/></svg></button>`}
       </div>
       ${c.tel1 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel1)}</span>${callLinkHtml(c.tel1)}</div>` : ''}
       ${c.tel2 ? `<div class="dir-row">${Icons.phone}<span>${esc(c.tel2)}</span>${callLinkHtml(c.tel2)}</div>` : ''}
@@ -202,6 +225,8 @@ function renderCentersTab(el, pubCenters, myCenters) {
     openPublicCenterModal(pubCenters.find(c => c.id === b.dataset.editCen))));
   el.querySelectorAll('[data-del-cen]').forEach(b => b.addEventListener('click', () =>
     adminDeleteConfirm('center', b.dataset.delCen)));
+  el.querySelectorAll('[data-fix-cen]').forEach(b => b.addEventListener('click', () =>
+    openProposeChangesModal('center', pubCenters.find(c => c.id === b.dataset.fixCen))));
 }
 
 // ─────────────────────────────────────────
@@ -260,17 +285,38 @@ function renderMineTab(el, mine) {
 // ─────────────────────────────────────────
 // Pestaña Revisión (solo admin)
 // ─────────────────────────────────────────
-function renderReviewTab(el, pendDocs, pendCenters) {
+/**
+ * Panel de revisión — Fase 4.
+ *
+ * Dos bloques, en este orden y con este color, como pide el plan:
+ *
+ *  1. NUEVOS INGRESOS (rojo). Entradas que todavía no existen en el
+ *     directorio. Van arriba porque son las que bloquean: mientras no se
+ *     aprueben, nadie más puede usarlas.
+ *  2. EDICIONES PROPUESTAS (amarillo). Correcciones a entradas ya
+ *     publicadas, agrupadas por entrada y con un badge que dice cuántos
+ *     campos trae cada una. Van abajo porque la entrada ya sirve: lo que
+ *     está en juego es mejorarla, no habilitarla.
+ *
+ * Los dos colores no son decorativos — separan "esto no existe todavía" de
+ * "esto existe y alguien dice que está mal", que se revisan distinto.
+ */
+function renderReviewTab(el, pendDocs, pendCenters, cambios, targetsById) {
   const rows = [
     ...pendDocs.map(d => ({ kind: 'doctor', item: d })),
     ...pendCenters.map(c => ({ kind: 'center', item: c })),
   ].sort((a, b) => (a.item.creadoEn || '').localeCompare(b.item.creadoEn || ''));
 
-  if (!rows.length) {
+  // Las correcciones se agrupan por entrada de destino: el panel revisa
+  // "este médico tiene 3 cambios propuestos", no 3 cambios sueltos sin
+  // contexto de a quién pertenecen.
+  const grupos = agruparCambios(cambios, targetsById);
+
+  if (!rows.length && !grupos.length) {
     el.innerHTML = emptyStateHtml({
       icon: Icons.checkCircle,
       title: 'Nada pendiente de revisión',
-      message: 'Cuando una familia proponga un médico o un centro, aparecerá aquí para aprobarlo, corregirlo o rechazarlo.',
+      message: 'Cuando una familia proponga un médico o un centro, o una corrección a uno ya publicado, aparecerá aquí.',
     });
     return;
   }
@@ -280,21 +326,41 @@ function renderReviewTab(el, pendDocs, pendCenters) {
        item.consultorio, item.tel, item.notas].filter(Boolean).map(esc).join(' · ')
     : [item.dir, item.tel1, item.tel2, item.email, item.web, item.notas].filter(Boolean).map(esc).join(' · ');
 
-  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px">
-    ${rows.map(({ kind, item }) => `
-      <div class="dir-proposal-row">
-        <div class="dir-avatar">${kind === 'doctor' ? Icons.user : Icons.hospital}</div>
-        <div style="flex:1;min-width:0">
-          <div class="dir-name" style="font-size:13.5px">${esc(item.nombre)}
-            <span style="font-size:11px;font-weight:500;color:var(--tm)">· ${kind === 'doctor' ? 'Médico' : 'Centro médico'}</span>
-          </div>
-          <div class="doc-detail">${detail({ kind, item }) || 'Sin datos adicionales'}</div>
+  el.innerHTML = `
+    ${rows.length ? `
+      <div class="dir-review-section">
+        <div class="dir-review-title dir-review-title-nuevo">
+          Nuevos ingresos <span class="dir-badge dir-badge-nuevo">${rows.length}</span>
         </div>
-        <button class="btn btn-sm btn-primary" data-approve="${kind}:${item.id}">Aprobar</button>
-        <button class="btn btn-sm" data-edit-pending="${kind}:${item.id}" title="Corregir los datos antes de aprobar">Editar</button>
-        <button class="btn btn-sm btn-danger" data-reject="${kind}:${item.id}">Rechazar</button>
-      </div>`).join('')}
-  </div>`;
+        <div style="display:flex;flex-direction:column;gap:10px">
+          ${rows.map(({ kind, item }) => `
+            <div class="dir-proposal-row dir-row-nuevo">
+              <div class="dir-avatar">${kind === 'doctor' ? Icons.user : Icons.hospital}</div>
+              <div style="flex:1;min-width:0">
+                <div class="dir-name" style="font-size:13.5px">${esc(item.nombre)}
+                  <span style="font-size:11px;font-weight:500;color:var(--tm)">· ${kind === 'doctor' ? 'Médico' : 'Centro médico'}</span>
+                </div>
+                <div class="doc-detail">${detail({ kind, item }) || 'Sin datos adicionales'}</div>
+              </div>
+              <button class="btn btn-sm btn-primary" data-approve="${kind}:${item.id}">Aprobar</button>
+              <button class="btn btn-sm" data-edit-pending="${kind}:${item.id}" title="Corregir los datos antes de aprobar">Editar</button>
+              <button class="btn btn-sm btn-danger" data-reject="${kind}:${item.id}">Rechazar</button>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+    ${grupos.length ? `
+      <div class="dir-review-section">
+        <div class="dir-review-title dir-review-title-editado">
+          Ediciones propuestas <span class="dir-badge dir-badge-editado">${grupos.length}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          ${grupos.map(g => grupoCambiosHtml(g)).join('')}
+        </div>
+      </div>` : ''}
+  `;
+
+  wireGruposDeCambios(el, grupos);
 
   const findItem = (spec) => {
     const [kind, id] = spec.split(':');
@@ -324,6 +390,181 @@ function renderReviewTab(el, pendDocs, pendCenters) {
     const { kind, id } = findItem(b.dataset.reject);
     openRejectModal(kind, id);
   }));
+}
+
+/**
+ * Agrupa las correcciones sueltas por la entrada a la que apuntan y les
+ * adjunta el valor ACTUAL de cada campo.
+ *
+ * El valor actual importa por algo que no es obvio: `valorAnterior` es una
+ * foto de cuando se propuso el cambio. Si la admin editó la entrada después,
+ * la foto quedó vieja y aceptar el cambio pisaría esa edición más nueva sin
+ * que nadie se entere. Por eso cada renglón compara los dos y marca los que
+ * quedaron desactualizados.
+ */
+function agruparCambios(cambios, targetsById) {
+  const porDestino = new Map();
+  for (const c of cambios) {
+    const target = targetsById.get(c.targetId);
+    // La entrada pudo eliminarse: sin ella no hay nada que revisar (el
+    // borrado en cascada limpia estas filas, esto es solo por si la lista
+    // se cargó antes del borrado).
+    if (!target) continue;
+    const clave = `${c.kind}:${c.targetId}`;
+    if (!porDestino.has(clave)) {
+      porDestino.set(clave, { kind: c.kind, target, cambios: [] });
+    }
+    const campos = c.kind === 'doctor' ? api.CAMPOS_PUBLIC_DOCTOR : api.CAMPOS_PUBLIC_CENTER;
+    const def = campos.find(x => x.campo === c.campo);
+    const valorActual = (def ? target[def.prop] : '') || '';
+    porDestino.get(clave).cambios.push({
+      ...c,
+      label: def?.label || c.campo,
+      valorActual,
+      desactualizado: (c.valorAnterior || '') !== valorActual,
+    });
+  }
+  return [...porDestino.values()];
+}
+
+const vacio = (v) => v ? esc(v) : '<span class="dir-vacio">(vacío)</span>';
+
+function grupoCambiosHtml({ kind, target, cambios }) {
+  return `
+    <div class="dir-proposal-row dir-row-editado" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div style="display:flex;align-items:center;gap:10px">
+        <div class="dir-avatar">${kind === 'doctor' ? Icons.user : Icons.hospital}</div>
+        <div style="flex:1;min-width:0">
+          <div class="dir-name" style="font-size:13.5px">${esc(target.nombre)}
+            <span style="font-size:11px;font-weight:500;color:var(--tm)">· ${kind === 'doctor' ? 'Médico' : 'Centro médico'}</span>
+          </div>
+          <div class="doc-detail">Ya publicado — se propone corregirlo</div>
+        </div>
+        <span class="dir-badge dir-badge-editado" title="Campos con cambio propuesto">${cambios.length} cambio${cambios.length === 1 ? '' : 's'}</span>
+      </div>
+
+      <table class="dir-cambios-table">
+        <thead><tr><th>Dato</th><th>Actual</th><th>Propuesto</th><th style="text-align:center">Decisión</th></tr></thead>
+        <tbody>
+          ${cambios.map(c => `
+            <tr${c.desactualizado ? ' class="dir-cambio-stale"' : ''}>
+              <td class="dir-cambio-campo">${esc(c.label)}</td>
+              <td>${vacio(c.valorActual)}${c.desactualizado
+                  ? `<div class="dir-cambio-aviso">Cuando se propuso decía ${vacio(c.valorAnterior)} — cambió desde entonces</div>`
+                  : ''}</td>
+              <td class="dir-cambio-nuevo">${vacio(c.valorPropuesto)}</td>
+              <td style="text-align:center">${multiClickButtonHtml(`mcb-${c.id}`, { label: c.label })}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+        <span class="dir-cambio-hint">Toca cada decisión: / sin decidir · ○ aceptar · ✗ rechazar</span>
+        <button class="btn btn-sm btn-primary" data-save-cambios="${kind}:${target.id}">Guardar cambios</button>
+      </div>
+    </div>`;
+}
+
+function wireGruposDeCambios(el, grupos) {
+  grupos.forEach(g => g.cambios.forEach(c => wireMultiClickButton(`mcb-${c.id}`)));
+
+  el.querySelectorAll('[data-save-cambios]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const [kind, targetId] = btn.dataset.saveCambios.split(':');
+      const grupo = grupos.find(g => g.kind === kind && g.target.id === targetId);
+      if (grupo) guardarDecisiones(grupo);
+    }));
+}
+
+/**
+ * Aplica las decisiones tomadas con los botones multiclic.
+ *
+ * Los que quedaron en "sin decidir" no se tocan: siguen pendientes para la
+ * próxima vez. Eso permite revisar un grupo a medias sin perder lo hecho ni
+ * verse obligado a resolver todo de una sentada.
+ */
+async function guardarDecisiones(grupo) {
+  const decisiones = grupo.cambios.map(c => ({ c, estado: readMultiClickButtonState(`mcb-${c.id}`) }));
+  const aceptados = decisiones.filter(d => d.estado === 'aceptado');
+  const rechazados = decisiones.filter(d => d.estado === 'rechazado');
+
+  if (!aceptados.length && !rechazados.length) {
+    showToast('Marca al menos una decisión antes de guardar', 'err');
+    return;
+  }
+
+  try {
+    // Primero se escribe la entrada pública y solo después se marcan las
+    // correcciones como resueltas. Al revés, un fallo al aplicar dejaría
+    // los cambios marcados como aceptados sin haberse aplicado nunca —
+    // invisibles para siempre, porque ya no saldrían en el panel.
+    if (aceptados.length) {
+      const valores = Object.fromEntries(aceptados.map(d => [d.c.campo, d.c.valorPropuesto || null]));
+      await api.applyDirectoryChanges(grupo.kind, grupo.target.id, valores);
+    }
+    await Promise.all(decisiones
+      .filter(d => d.estado !== 'neutral')
+      .map(d => api.resolveChangeProposal(d.c.id, d.estado)));
+
+    const partes = [];
+    if (aceptados.length) partes.push(`${aceptados.length} aplicado(s)`);
+    if (rechazados.length) partes.push(`${rechazados.length} rechazado(s)`);
+    showToast(partes.join(' · '));
+    render();
+  } catch (err) {
+    showToast(err.message || 'No se pudieron guardar las decisiones', 'err');
+  }
+}
+
+/**
+ * Proponer correcciones a una entrada YA publicada — Fase 4, sistema de
+ * curación. Es la contraparte de "proponer una entrada nueva": acá la
+ * entrada existe y lo que se propone es cambiar campos puntuales.
+ *
+ * Se guarda una fila por campo efectivamente cambiado (no por formulario):
+ * el panel de revisión acepta o rechaza dato por dato, así que un cambio
+ * bueno no queda atado a uno malo del mismo envío.
+ */
+function openProposeChangesModal(kind, item) {
+  const campos = kind === 'doctor' ? api.CAMPOS_PUBLIC_DOCTOR : api.CAMPOS_PUBLIC_CENTER;
+  const titulo = kind === 'doctor' ? 'Proponer corrección — médico' : 'Proponer corrección — centro';
+
+  showModal(
+    titulo,
+    `<div class="form-body">
+      <p style="font-size:12.5px;color:var(--ts);margin:0 0 12px">Cambia solo lo que esté mal o falte. La administradora revisa cada dato por separado, así que puedes corregir varias cosas de una vez.</p>
+      <div class="form-row cols-2">
+        ${campos.map(c => `
+          <div class="form-field span2">
+            <label class="fl">${esc(c.label)}</label>
+            <input class="fi" id="dcp-${c.campo}" type="text" value="${esc(item[c.prop] || '')}"/>
+          </div>`).join('')}
+      </div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: closeModal },
+      { label: 'Enviar corrección', cls: 'btn btn-primary', action: async () => {
+        // Solo viaja lo que realmente cambió: mandar todos los campos
+        // convertiría cada envío en 7 "cambios" a revisar, casi todos
+        // idénticos a lo que ya estaba.
+        const cambios = campos.reduce((acc, c) => {
+          const antes = (item[c.prop] || '').trim();
+          const ahora = document.getElementById(`dcp-${c.campo}`).value.trim();
+          if (antes !== ahora) acc.push({ campo: c.campo, valorAnterior: antes, valorPropuesto: ahora });
+          return acc;
+        }, []);
+        if (!cambios.length) { showToast('No cambiaste ningún dato', 'err'); return; }
+        try {
+          await api.proposeDirectoryChanges(kind, item.id, cambios);
+          closeModal();
+          showToast(`${cambios.length} corrección(es) enviada(s) a revisión`);
+          render();
+        } catch (err) {
+          showToast(err.message || 'No se pudo enviar la corrección', 'err');
+        }
+      } },
+    ]
+  );
 }
 
 function openRejectModal(kind, id) {

@@ -491,6 +491,111 @@ function publicCenterToRow(c) {
   };
 }
 
+// ─────────────────────────────────────────
+// SISTEMA DE CURACIÓN — correcciones a entradas ya publicadas (Fase 4)
+// Una fila por campo propuesto (migración 0026). La RLS decide quién ve
+// qué: la proponente lo suyo, la admin todo.
+// ─────────────────────────────────────────
+
+/** Campos que se pueden proponer, con su etiqueta legible y la propiedad
+ *  del objeto en JS. El orden es el que se muestra en el panel. */
+export const CAMPOS_PUBLIC_DOCTOR = [
+  { campo: 'nombre', label: 'Nombre', prop: 'nombre' },
+  { campo: 'especialidad', label: 'Especialidad', prop: 'especialidad' },
+  { campo: 'tarjeta_profesional', label: 'Tarjeta profesional', prop: 'tarjetaProfesional' },
+  { campo: 'centro', label: 'Centro médico', prop: 'centro' },
+  { campo: 'consultorio', label: 'Consultorio', prop: 'consultorio' },
+  { campo: 'telefono', label: 'Teléfono', prop: 'tel' },
+  { campo: 'notas', label: 'Notas', prop: 'notas' },
+];
+
+export const CAMPOS_PUBLIC_CENTER = [
+  { campo: 'nombre', label: 'Nombre', prop: 'nombre' },
+  { campo: 'direccion', label: 'Dirección', prop: 'dir' },
+  { campo: 'tel1', label: 'Teléfono 1', prop: 'tel1' },
+  { campo: 'tel2', label: 'Teléfono 2', prop: 'tel2' },
+  { campo: 'email', label: 'Correo', prop: 'email' },
+  { campo: 'web', label: 'Sitio web', prop: 'web' },
+];
+
+function rowToChangeProposal(r) {
+  return {
+    id: r.id,
+    kind: r.public_doctor_id ? 'doctor' : 'center',
+    targetId: r.public_doctor_id || r.public_center_id,
+    campo: r.campo,
+    valorAnterior: r.valor_anterior,
+    valorPropuesto: r.valor_propuesto,
+    estado: r.estado,
+    propuestoPor: r.propuesto_por,
+    creadoEn: r.created_at,
+  };
+}
+
+/** Correcciones pendientes visibles para quien consulta (admin: todas). */
+export async function listChangeProposals(estado = 'pendiente') {
+  const { data, error } = await supabase.from('directory_change_proposals')
+    .select('*').eq('estado', estado).order('created_at');
+  if (error) throw error;
+  return data.map(rowToChangeProposal);
+}
+
+/**
+ * Registra una corrección por cada campo cambiado.
+ * @param {'doctor'|'center'} kind
+ * @param {string} targetId
+ * @param {Array<{campo: string, valorAnterior: string, valorPropuesto: string}>} cambios
+ */
+export async function proposeDirectoryChanges(kind, targetId, cambios) {
+  if (!cambios.length) return [];
+  const destino = kind === 'doctor' ? 'public_doctor_id' : 'public_center_id';
+  const filas = cambios.map(c => ({
+    [destino]: targetId,
+    campo: c.campo,
+    valor_anterior: c.valorAnterior || null,
+    valor_propuesto: c.valorPropuesto || null,
+  }));
+  const { data, error } = await supabase.from('directory_change_proposals').insert(filas).select();
+  if (error) throw error;
+  return data.map(rowToChangeProposal);
+}
+
+/** Marca una corrección como aceptada o rechazada (solo admin). */
+export async function resolveChangeProposal(id, estado) {
+  const { error } = await supabase.from('directory_change_proposals')
+    .update({ estado }).eq('id', id);
+  if (error) throw error;
+}
+
+/**
+ * Escribe en la entrada pública los campos aceptados.
+ * @param {'doctor'|'center'} kind
+ * @param {string} targetId
+ * @param {Record<string,string|null>} valoresPorCampo - nombre de columna → valor.
+ */
+export async function applyDirectoryChanges(kind, targetId, valoresPorCampo) {
+  if (!Object.keys(valoresPorCampo).length) return;
+  const tabla = kind === 'doctor' ? 'public_doctors' : 'public_centers';
+  const { error } = await supabase.from(tabla).update(valoresPorCampo).eq('id', targetId);
+  if (error) throw error;
+}
+
+/** Entradas públicas por id, para poder mostrar el valor ACTUAL junto al
+ *  que se propuso (y detectar que cambió desde entonces). */
+export async function getPublicDoctorsByIds(ids) {
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('public_doctors').select('*').in('id', ids);
+  if (error) throw error;
+  return data.map(rowToPublicDoctor);
+}
+
+export async function getPublicCentersByIds(ids) {
+  if (!ids.length) return [];
+  const { data, error } = await supabase.from('public_centers').select('*').in('id', ids);
+  if (error) throw error;
+  return data.map(rowToPublicCenter);
+}
+
 /** ¿La cuenta actual es administradora del directorio? La RLS de app_admins
  * solo deja ver la fila propia, así que basta con mirar si hay alguna. */
 export async function isDirectoryAdmin() {

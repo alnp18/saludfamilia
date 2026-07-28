@@ -1078,6 +1078,45 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .dir-proposal-row:hover { border-color:var(--border-lt); }
 .dir-review-note { font-size:12px; color:var(--ts); font-style:italic; margin-top:3px; }
 
+/* ══ SISTEMA DE CURACIÓN (panel de revisión, Fase 4) ══
+   Rojo = entrada nueva (todavía no existe en el directorio).
+   Amarillo = entrada publicada con correcciones propuestas.
+   El color no es decorativo: separa dos cosas que se revisan distinto. */
+.dir-review-section { margin-bottom:26px; }
+.dir-review-title {
+  font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px;
+  margin-bottom:10px; display:flex; align-items:center; gap:8px;
+}
+.dir-review-title::after { content:''; flex:1; height:1px; background:var(--border); }
+.dir-review-title-nuevo { color:var(--red-lt); }
+.dir-review-title-editado { color:var(--amber-lt); }
+
+.dir-badge {
+  font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:20px;
+  text-transform:none; letter-spacing:0;
+}
+.dir-badge-nuevo { background:var(--red-dim); color:var(--red-lt); border:1px solid rgba(239,68,68,.3); }
+.dir-badge-editado { background:var(--amber-dim); color:var(--amber-lt); border:1px solid rgba(245,158,11,.3); }
+
+.dir-row-nuevo { border-left:3px solid var(--red); background:linear-gradient(90deg, var(--red-dim), transparent 55%), var(--card); }
+.dir-row-editado { border-left:3px solid var(--amber); background:linear-gradient(90deg, var(--amber-dim), transparent 55%), var(--card); }
+
+.dir-cambios-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+.dir-cambios-table th {
+  text-align:left; font-size:10.5px; font-weight:700; text-transform:uppercase;
+  letter-spacing:.5px; color:var(--tm); padding:6px 8px; border-bottom:1px solid var(--border);
+}
+.dir-cambios-table td { padding:8px; border-bottom:1px solid var(--border); vertical-align:top; color:var(--ts); }
+.dir-cambios-table tr:last-child td { border-bottom:none; }
+.dir-cambio-campo { font-weight:600; color:var(--tp); white-space:nowrap; }
+.dir-cambio-nuevo { color:var(--tp); font-weight:600; }
+.dir-vacio { color:var(--tm); font-style:italic; }
+/* Fila cuyo valor actual ya no coincide con la foto que se tomó al
+   proponer: aceptarla pisaría una edición posterior. */
+.dir-cambio-stale { background:rgba(245,158,11,.06); }
+.dir-cambio-aviso { font-size:11px; color:var(--amber-lt); margin-top:3px; }
+.dir-cambio-hint { font-size:11px; color:var(--tm); margin-right:auto; }
+
 body.patient-themed:not(.light-mode) { color-scheme: dark; }
 
 /* ══ AUTH SCREEN ══ */
