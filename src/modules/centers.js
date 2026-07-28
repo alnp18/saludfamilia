@@ -125,8 +125,8 @@ function openCenterModal(id) {
         <div class="form-field span2"><label class="fl">Nombre *</label><input class="fi" id="cf-nombre" type="text" placeholder="Nombre del centro o clínica"/></div>
         ${phoneFieldHtml({ id: 'cf-tel1', label: 'Teléfono 1', placeholder: '(+57) 601…' })}
         ${phoneFieldHtml({ id: 'cf-tel2', label: 'Teléfono 2', placeholder: 'Opcional' })}
-        ${geoFieldsHtml('cf')}
         <div class="form-field span2"><label class="fl">Dirección</label><input class="fi" id="cf-dir" type="text" placeholder="Calle, carrera…"/></div>
+        ${geoFieldsHtml('cf')}
         <div class="form-field"><label class="fl">Correo</label><input class="fi" id="cf-email" type="email" placeholder="info@clinica.com"/></div>
         <div class="form-field"><label class="fl">Sitio web</label><input class="fi" id="cf-web" type="url" placeholder="https://…"/></div>
       </div>
