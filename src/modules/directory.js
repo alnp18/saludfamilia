@@ -86,7 +86,13 @@ export async function render() {
   }
 
   // ── Pestañas ──
-  const cambiosCount = new Set(cambios.map(c => c.targetId)).size;
+  // El badge cuenta solo lo que el panel va a poder mostrar: una corrección
+  // cuya entrada de destino no se pudo resolver se descarta al agrupar, y un
+  // número que no corresponde con nada visible manda a buscar algo que no
+  // está.
+  const cambiosCount = new Set(
+    cambios.filter(c => targetsById.has(c.targetId)).map(c => c.targetId)
+  ).size;
   const pendCount = pendDocs.length + pendCenters.length + cambiosCount;
   const myCount = mine.doctors.length + mine.centers.length;
   const pill = (key, label, count) => `
@@ -416,7 +422,13 @@ function agruparCambios(cambios, targetsById) {
     }
     const campos = c.kind === 'doctor' ? api.CAMPOS_PUBLIC_DOCTOR : api.CAMPOS_PUBLIC_CENTER;
     const def = campos.find(x => x.campo === c.campo);
-    const valorActual = (def ? target[def.prop] : '') || '';
+    // Defensa en profundidad: un campo fuera de la lista blanca no se
+    // muestra ni se puede aceptar. La migración 0027 ya lo impide al
+    // insertar, pero el panel aplica lo aceptado usando este texto como
+    // nombre de columna, y esa escritura corre con permisos de admin — no
+    // puede depender de que la única barrera esté aguas arriba.
+    if (!def) continue;
+    const valorActual = target[def.prop] || '';
     porDestino.get(clave).cambios.push({
       ...c,
       label: def?.label || c.campo,
@@ -502,9 +514,9 @@ async function guardarDecisiones(grupo) {
       const valores = Object.fromEntries(aceptados.map(d => [d.c.campo, d.c.valorPropuesto || null]));
       await api.applyDirectoryChanges(grupo.kind, grupo.target.id, valores);
     }
-    await Promise.all(decisiones
-      .filter(d => d.estado !== 'neutral')
-      .map(d => api.resolveChangeProposal(d.c.id, d.estado)));
+    for (const d of decisiones.filter(x => x.estado !== 'neutral')) {
+      await api.resolveChangeProposal(d.c.id, d.estado);
+    }
 
     const partes = [];
     if (aceptados.length) partes.push(`${aceptados.length} aplicado(s)`);
@@ -512,7 +524,14 @@ async function guardarDecisiones(grupo) {
     showToast(partes.join(' · '));
     render();
   } catch (err) {
-    showToast(err.message || 'No se pudieron guardar las decisiones', 'err');
+    // Los dos pasos (escribir la entrada y marcar las correcciones) no son
+    // una transacción. Si falla entre medio, la entrada pudo quedar ya
+    // actualizada con correcciones todavía sin marcar; volver a aceptarlas
+    // escribe el mismo valor, así que reintentar es seguro. Lo que no se
+    // puede es dejar el panel mostrando el estado viejo: se recarga para que
+    // lo que se ve sea lo que hay.
+    showToast(err.message || 'No se pudieron guardar todas las decisiones — revisa el estado actual', 'err');
+    render();
   }
 }
 
@@ -554,6 +573,14 @@ function openProposeChangesModal(kind, item) {
           return acc;
         }, []);
         if (!cambios.length) { showToast('No cambiaste ningún dato', 'err'); return; }
+        // El nombre es obligatorio en el directorio. Si se dejara vaciar,
+        // el error saldría recién al aceptar la corrección —del lado de la
+        // admin, sin contexto— y tumbaría de paso los demás campos
+        // aceptados en el mismo guardado.
+        if (cambios.some(c => c.campo === 'nombre' && !c.valorPropuesto)) {
+          showToast('El nombre no puede quedar vacío', 'err');
+          return;
+        }
         try {
           await api.proposeDirectoryChanges(kind, item.id, cambios);
           closeModal();
