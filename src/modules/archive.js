@@ -25,6 +25,9 @@ import { coincideAprox } from '../lib/searchSources.js';
 
 const SLOTS = [
   { key: 'orden_archivo', etiqueta: 'Historia clínica', fecha: o => o.fechaOrden, hc: true },
+  // Ojo: `orden_archivo` guarda la historia clínica y `orden_documento` la
+  // orden. El nombre de la primera es histórico — ver migración 0033.
+  { key: 'orden_documento', etiqueta: 'Orden', fecha: o => o.fechaOrden, hc: false },
   { key: 'solicitud_imagen', etiqueta: 'Solicitud', fecha: o => o.solicitud_fecha, hc: false },
   { key: 'auth_imagen', etiqueta: 'Autorización', fecha: o => o.auth_fechaInicio, hc: false },
 ];

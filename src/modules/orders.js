@@ -2,6 +2,7 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
+import { openImageCropper } from '../lib/imageCropper.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
 import { openViewOverlay, closeViewOverlay } from '../lib/viewModeOverlay.js';
 import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
@@ -41,7 +42,15 @@ let dateTo = ''; // fecha de la orden, rango "hasta"
 // de tarjetas con filtros; 'flujo' es la nueva línea de tiempo.
 let ordersViewMode = 'lista';
 let expandedFlowGroups = new Set(); // claves de grupo abiertas (persiste entre renders)
-let orderFiles = { orden: null, solicitud: null, autorizacion: null };
+let orderFiles = { orden: null, documento: null, solicitud: null, autorizacion: null };
+// Hojas fotografiadas en esta sesión, por slot. Una historia clínica puede
+// tener varias y se guardan como un PDF de varias páginas: es un documento,
+// no tres adjuntos sueltos. Vive aparte de orderFiles porque el PDF hay que
+// rearmarlo entero cada vez que se suma o se quita una hoja.
+let orderPages = { orden: [], documento: [], solicitud: [], autorizacion: [] };
+// Proporción de una hoja carta vertical. El recortador necesita un marco fijo;
+// el de una hoja es el que sirve para encuadrar el papel y dejar fuera la mesa.
+const HOJA_ASPECT = 8.5 / 11;
 let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
 // -1 = orden nueva (sin restricción de navegación); si no, índice de la
@@ -435,6 +444,7 @@ function renderOrderReadView(o, docMap, centerMap, authList) {
     ${roField('Tipo de orden', o.tipoOrden ? esc(o.tipoOrden) : null)}
     ${roField('Descripción', o.descripcion ? esc(o.descripcion) : null)}
     ${o.orden_archivo ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="orden">Ver historia clínica</button>` : roField('Historia clínica', null)}
+    ${o.orden_documento ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="documento">Ver orden</button>` : roField('Orden', null)}
   </div>`;
 
   const seccionB = stageIdx >= 1 ? `<div class="ro-section">
@@ -528,13 +538,57 @@ async function openOrderModal(id) {
  * convierte automáticamente a PDF — cambio transversal P1.5, aplica a las
  * 3 secciones (Historia clínica, Solicitud, Autorización), no solo a la
  * primera. En memoria hasta guardar la orden: recién ahí se sube a Storage. */
-async function handleFileInput(inputEl, slot) {
+/**
+ * Un archivo recién elegido para un slot de adjunto.
+ *
+ * Un PDF entra tal cual. Una foto pasa primero por el recortador, con marco de
+ * hoja carta: la cámara del teléfono captura la mesa, la mano y el papel
+ * torcido, y hasta ahora todo eso quedaba guardado como "la historia clínica".
+ * Se puede cancelar el recorte, y entonces no se guarda nada — cancelar
+ * significa "esta foto no", no "guárdala como salga".
+ *
+ * Las fotos se acumulan: cada hoja nueva se suma al PDF en vez de reemplazarlo,
+ * porque una historia clínica de tres hojas es un documento de tres páginas.
+ * Un PDF subido desde archivos sí reemplaza lo que hubiera: no se puede
+ * anexarle páginas del lado del navegador sin reescribirlo entero.
+ */
+async function handleFileInput(inputEl, slot, { anexar = false } = {}) {
   const file = inputEl.files[0];
-  if (!file) return;
-  const processed = await files.processUploadFile(file);
   inputEl.value = ''; // permite volver a elegir el mismo archivo (subir vs. cámara)
-  if (!processed) return; // ya se avisó (tamaño demasiado grande, etc.)
-  orderFiles[slot] = processed;
+  if (!file) return;
+
+  if (!file.type.startsWith('image/')) {
+    const processed = await files.processUploadFile(file);
+    if (!processed) return; // ya se avisó (tamaño demasiado grande, etc.)
+    orderPages[slot] = [];
+    orderFiles[slot] = processed;
+    renderFilePreview(slot);
+    return;
+  }
+
+  if (!files.validateImageFile(file)) return;
+  const dataUrl = await files.blobToDataUrl(file);
+  const recortada = await openImageCropper(dataUrl, {
+    shape: 'rect',
+    aspect: HOJA_ASPECT,
+    outputWidth: 1400, // legible: es un documento para leer, no una miniatura
+    title: anexar ? 'Ajustar la hoja siguiente' : 'Ajustar la hoja',
+  });
+  if (!recortada) return; // canceló el recorte
+
+  const paginas = anexar ? [...orderPages[slot], recortada] : [recortada];
+  try {
+    const pdf = await files.imagesToPdfDataUrl(paginas);
+    orderPages[slot] = paginas;
+    orderFiles[slot] = {
+      name: `${slot === 'orden' ? 'historia-clinica' : slot}-${paginas.length}-hoja${paginas.length !== 1 ? 's' : ''}.pdf`,
+      type: 'application/pdf',
+      data: pdf,
+    };
+  } catch {
+    showToast('No se pudo armar el PDF con la foto', 'err');
+    return;
+  }
   renderFilePreview(slot);
 }
 
@@ -544,11 +598,16 @@ function renderFilePreview(slot) {
   if (!el) return;
   if (!f) { el.innerHTML = ''; return; }
   const isImg = (f.type || '').startsWith('image/');
+  // "Agregar otra hoja" solo tiene sentido sobre un PDF armado con fotos en
+  // esta sesión: a uno ya guardado en Storage no se le pueden anexar páginas
+  // desde el navegador, y ofrecerlo sería prometer algo que no ocurre.
+  const hojas = orderPages[slot]?.length || 0;
   el.innerHTML = `<div class="file-preview">
     ${isImg ? `<img id="fp-img-${slot}" ${f.data ? `src="${f.data}"` : ''} style="width:32px;height:32px;object-fit:cover;border-radius:4px"/>` : `<div class="fp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg></div>`}
-    <div class="fp-name" data-open-slot="${slot}" title="Ver archivo">${esc(f.name)}</div>
+    <div class="fp-name" data-open-slot="${slot}" title="Ver archivo">${esc(f.name)}${hojas > 1 ? ` · ${hojas} hojas` : ''}</div>
     <span class="fp-remove" data-remove-slot="${slot}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-  </div>`;
+  </div>
+  ${hojas ? `<button type="button" class="btn btn-sm" data-add-page="${slot}" style="margin-top:6px">${CAMERA_ICON} Agregar otra hoja</button>` : ''}`;
   // Miniatura de un adjunto ya en Storage: URL firmada (asíncrona).
   if (isImg && !f.data && files.isStored(f)) {
     files.getSignedUrl(f.path).then(url => {
@@ -558,7 +617,16 @@ function renderFilePreview(slot) {
   }
   el.querySelector('[data-open-slot]')?.addEventListener('click', () =>
     openAttachmentViewer(orderFiles[slot]));
-  el.querySelector('[data-remove-slot]')?.addEventListener('click', () => { orderFiles[slot] = null; renderFilePreview(slot); });
+  el.querySelector('[data-remove-slot]')?.addEventListener('click', () => {
+    orderFiles[slot] = null;
+    orderPages[slot] = [];
+    renderFilePreview(slot);
+  });
+  el.querySelector('[data-add-page]')?.addEventListener('click', () => {
+    const input = document.getElementById(`cam-${slot}`);
+    input.dataset.anexar = '1';
+    input.click();
+  });
 }
 
 const CAMERA_ICON = '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
@@ -583,8 +651,16 @@ function fileFieldHtml(slot, dropText, acceptUpload) {
 function wireFileSlot(slot) {
   document.getElementById(`drop-${slot}`).addEventListener('click', () => document.getElementById(`file-${slot}`).click());
   document.getElementById(`file-${slot}`).addEventListener('change', function () { handleFileInput(this, slot); });
-  document.getElementById(`cam-btn-${slot}`).addEventListener('click', () => document.getElementById(`cam-${slot}`).click());
-  document.getElementById(`cam-${slot}`).addEventListener('change', function () { handleFileInput(this, slot); });
+  document.getElementById(`cam-btn-${slot}`).addEventListener('click', () => {
+    const input = document.getElementById(`cam-${slot}`);
+    delete input.dataset.anexar;
+    input.click();
+  });
+  document.getElementById(`cam-${slot}`).addEventListener('change', function () {
+    const anexar = this.dataset.anexar === '1';
+    delete this.dataset.anexar;
+    handleFileInput(this, slot, { anexar });
+  });
 }
 
 /** Abre el asistente de edición. `id` ausente = orden nueva (sin
@@ -777,7 +853,8 @@ async function onSeleccionMedicoTratante(sel, altaMedico) {
 }
 
 async function openOrderWizard(id, prefill, forceTab) {
-  orderFiles = { orden: null, solicitud: null, autorizacion: null };
+  orderFiles = { orden: null, documento: null, solicitud: null, autorizacion: null };
+  orderPages = { orden: [], documento: [], solicitud: [], autorizacion: [] };
   originalStoredPaths = [];
   currentOrderStageIdx = -1;
   authRows = [];
@@ -792,6 +869,7 @@ async function openOrderWizard(id, prefill, forceTab) {
     if (id) {
       o = await api.getOrder(id);
       if (o.orden_archivo) orderFiles.orden = o.orden_archivo;
+      if (o.orden_documento) orderFiles.documento = o.orden_documento;
       if (o.solicitud_imagen) orderFiles.solicitud = o.solicitud_imagen;
       if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
       originalStoredPaths = files.attachmentPathsOfOrder(o);
@@ -836,6 +914,9 @@ async function openOrderWizard(id, prefill, forceTab) {
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
         <div class="form-field span2"><label class="fl">Historia clínica</label>
           ${fileFieldHtml('orden', 'Haz clic para subir la historia clínica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
+        </div>
+        <div class="form-field span2"><label class="fl">Orden</label>
+          ${fileFieldHtml('documento', 'Haz clic para subir la orden médica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
         </div>
       </div>
     </div>
@@ -888,6 +969,7 @@ async function openOrderWizard(id, prefill, forceTab) {
 
   document.querySelectorAll('.wiz-tab').forEach(t => t.addEventListener('click', () => switchWizTab(t.dataset.t)));
   wireFileSlot('orden');
+  wireFileSlot('documento');
   wireFileSlot('solicitud');
 
   // Médico tratante: buscador en vivo sobre los médicos propios y el
@@ -1130,7 +1212,10 @@ function switchWizTab(t) {
 }
 
 // Slot del wizard → campo jsonb de la orden
-const FILE_SLOTS = { orden: 'orden_archivo', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
+// Slot del wizard → campo jsonb de la orden. Ojo: `orden_archivo` guarda la
+// HISTORIA CLÍNICA y `orden_documento` la orden — el nombre de la primera es
+// histórico, era el único adjunto de la etapa (ver migración 0033).
+const FILE_SLOTS = { orden: 'orden_archivo', documento: 'orden_documento', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
 
 /**
  * Sube a Storage los adjuntos recién elegidos (los que aún tienen `data`
@@ -1160,6 +1245,7 @@ async function saveOrderForm(editId) {
     tipoOrden,
     descripcion: document.getElementById('of-desc').value.trim(),
     orden_archivo: orderFiles.orden,
+    orden_documento: orderFiles.documento,
     solicitud_fecha: document.getElementById('of-sol-fecha').value,
     solicitud_hora: document.getElementById('of-sol-hora').value,
     solicitud_numero: document.getElementById('of-sol-num').value.trim(),

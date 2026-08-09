@@ -98,7 +98,7 @@ export async function removeAttachments(paths) {
 
 /** Rutas de todos los adjuntos en Storage de una orden (para limpieza). */
 export function attachmentPathsOfOrder(order) {
-  return [order?.orden_archivo, order?.solicitud_imagen, order?.auth_imagen]
+  return [order?.orden_archivo, order?.orden_documento, order?.solicitud_imagen, order?.auth_imagen]
     .filter(isStored)
     .map(a => a.path);
 }
@@ -119,21 +119,38 @@ function loadImage(dataUrl) {
  * y queda guardada como PDF, igual que si hubiera subido uno ya existente.
  */
 export async function imageToPdfDataUrl(dataUrl) {
+  return imagesToPdfDataUrl([dataUrl]);
+}
+
+/**
+ * Varias imágenes (data-URLs) en un PDF, una hoja por página, en el orden
+ * recibido. Una historia clínica de tres hojas es un documento, no tres
+ * adjuntos sueltos: así se abre, se descarga y se imprime de una vez, y el
+ * campo de la orden sigue guardando un solo archivo.
+ */
+export async function imagesToPdfDataUrl(dataUrls) {
   // Carga perezosa: jsPDF (+ sus dependencias de compresión/decodificación
   // PNG) solo se descarga si de verdad se sube una foto para este campo —
   // la mayoría de las órdenes suben un PDF ya existente y nunca la necesitan.
-  const [{ jsPDF }, img] = await Promise.all([import('jspdf'), loadImage(dataUrl)]);
-  const orientation = img.width > img.height ? 'landscape' : 'portrait';
-  const doc = new jsPDF({ orientation, unit: 'pt', format: 'letter' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 24;
-  const maxW = pageW - margin * 2, maxH = pageH - margin * 2;
-  const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
-  const w = img.width * ratio, h = img.height * ratio;
-  const x = (pageW - w) / 2, y = (pageH - h) / 2;
-  const format = (/^data:image\/(\w+);/.exec(dataUrl)?.[1] || 'jpeg').toUpperCase();
-  doc.addImage(dataUrl, format === 'JPG' ? 'JPEG' : format, x, y, w, h);
+  const [{ jsPDF }, imgs] = await Promise.all([
+    import('jspdf'),
+    Promise.all(dataUrls.map(loadImage)),
+  ]);
+  let doc = null;
+  imgs.forEach((img, i) => {
+    const orientation = img.width > img.height ? 'landscape' : 'portrait';
+    if (i === 0) doc = new jsPDF({ orientation, unit: 'pt', format: 'letter' });
+    else doc.addPage('letter', orientation);
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 24;
+    const maxW = pageW - margin * 2, maxH = pageH - margin * 2;
+    const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+    const w = img.width * ratio, h = img.height * ratio;
+    const x = (pageW - w) / 2, y = (pageH - h) / 2;
+    const format = (/^data:image\/(\w+);/.exec(dataUrls[i])?.[1] || 'jpeg').toUpperCase();
+    doc.addImage(dataUrls[i], format === 'JPG' ? 'JPEG' : format, x, y, w, h);
+  });
   return doc.output('datauristring');
 }
 
