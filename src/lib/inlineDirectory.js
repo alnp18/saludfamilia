@@ -4,6 +4,7 @@ import { esc } from './utils.js';
 import { showToast, openStackedModal, closeStackedModal } from './modal.js';
 import { callInputButtonHtml } from './phone.js';
 import { invalidarCacheMedicos } from './searches.js';
+import { consentFieldHtml, readConsentIn } from './directoryConsent.js';
 
 /**
  * Alta rápida de centro médico o médico "sin salir del flujo" (P1.5 —
@@ -83,6 +84,7 @@ export function openNewCenterModal({ onSaved } = {}) {
       <div class="form-field"><label class="fl">Teléfono</label><div class="call-field"><input class="fi" id="nc-tel1" type="tel" placeholder="(+57) 601 …"/>${callInputButtonHtml('nc-tel1')}</div></div>
       <div class="form-field"><label class="fl">Dirección</label><input class="fi" id="nc-dir" type="text" placeholder="Dirección"/></div>
     </div>
+    ${consentFieldHtml({ id: 'nc-compartir', tipo: 'centro', compacto: true })}
     <p style="font-size:11.5px;color:var(--tm);margin:10px 0 0">Puedes completar el resto de los datos después, desde Centros médicos.</p>`,
     [
       { label: 'Cancelar', cls: 'btn', action: () => closeStackedModal() },
@@ -97,7 +99,8 @@ export function openNewCenterModal({ onSaved } = {}) {
     const tel1 = overlay.querySelector('#nc-tel1').value.trim();
     const dir = overlay.querySelector('#nc-dir').value.trim();
     try {
-      const saved = await api.saveCenter({ nombre, tel1, dir }, state.household.id);
+      const compartir = readConsentIn(overlay, 'nc-compartir');
+      const saved = await api.saveCenter({ nombre, tel1, dir, compartirDirectorio: compartir }, state.household.id);
       // Se cierra antes de avisar al de abajo para que, cuando este
       // actualice su <select>, el modal ya no esté tapando el resultado.
       closeStackedModal();
@@ -174,6 +177,7 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
           </div>
         </div>
       </div>
+      ${consentFieldHtml({ id: `${formContainerId}-compartir`, tipo: 'medico', compacto: true })}
       <div style="display:flex;gap:8px;margin-top:6px">
         <button type="button" class="btn btn-sm btn-primary" id="${formContainerId}-save">Guardar médico</button>
         <button type="button" class="btn btn-sm" id="${formContainerId}-cancel">Cancelar</button>
@@ -192,7 +196,8 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
       const especialidad = document.getElementById(`${formContainerId}-esp`).value;
       const centroId = document.getElementById(`${formContainerId}-centro`).value;
       try {
-        const saved = await api.saveDoctor({ nombre, especialidad, centroId }, state.household.id);
+        const compartir = readConsentIn(container, `${formContainerId}-compartir`);
+        const saved = await api.saveDoctor({ nombre, especialidad, centroId, compartirDirectorio: compartir }, state.household.id);
         [primarySelectId, ...otherSelectIds].filter(Boolean).forEach(id => {
           const select = document.getElementById(id);
           if (!select) return;

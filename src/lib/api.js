@@ -334,11 +334,18 @@ export async function listCatalogOptions(householdId, categoria) {
   return data.map(r => r.valor);
 }
 
-export async function addCatalogOption(householdId, categoria, valor) {
+/** `compartir` solo pesa en la categoría 'especialidad', la única que
+ * alimenta el directorio público (migración 0030): una especialidad nueva
+ * viaja a la cola de revisión igual que un médico, así que sigue la misma
+ * decisión que tomó la familia en el formulario. En las demás categorías la
+ * columna existe pero ningún trigger la mira. */
+export async function addCatalogOption(householdId, categoria, valor, compartir) {
   const v = (valor || '').trim();
   if (!v) return null;
+  const row = { household_id: householdId, categoria, valor: v };
+  if (typeof compartir === 'boolean') row.compartir_directorio = compartir;
   const { data, error } = await supabase.from('custom_catalog_options')
-    .upsert({ household_id: householdId, categoria, valor: v }, { onConflict: 'household_id,categoria,valor', ignoreDuplicates: true })
+    .upsert(row, { onConflict: 'household_id,categoria,valor', ignoreDuplicates: true })
     .select().maybeSingle();
   if (error) throw error;
   return v;
@@ -354,6 +361,7 @@ function rowToCenter(r) {
     // Patrón Departamento/Municipio (DANE) — auditoría móvil 2026-07-25.
     departamento: r.departamento, municipio: r.municipio,
     publicSourceId: r.public_source_id,
+    compartirDirectorio: r.compartir_directorio,
   };
 }
 function centerToRow(c, householdId) {
@@ -367,6 +375,10 @@ function centerToRow(c, householdId) {
   // clave — así una edición normal desde el formulario (que no la conoce) no
   // pisa a null la referencia de una copia hecha desde el directorio público.
   if ('publicSourceId' in c) row.public_source_id = c.publicSourceId || null;
+  // Consentimiento del directorio (0030): solo se escribe cuando el llamador
+  // trae una decisión explícita. El formulario de edición no muestra la
+  // casilla, así que no manda nada y la fila conserva lo que ya tenía.
+  if (typeof c.compartirDirectorio === 'boolean') row.compartir_directorio = c.compartirDirectorio;
   return row;
 }
 
@@ -406,6 +418,7 @@ function rowToDoctor(r) {
     centroId: r.centro_id, consultorio: r.consultorio, tel: r.telefono, notas: r.notas,
     tarjetaProfesional: r.tarjeta_profesional,
     publicSourceId: r.public_source_id,
+    compartirDirectorio: r.compartir_directorio,
   };
 }
 function doctorToRow(d, householdId) {
@@ -418,6 +431,8 @@ function doctorToRow(d, householdId) {
   };
   // Procedencia (pieza A) — mismo criterio que centerToRow.
   if ('publicSourceId' in d) row.public_source_id = d.publicSourceId || null;
+  // Consentimiento del directorio (0030) — mismo criterio que centerToRow.
+  if (typeof d.compartirDirectorio === 'boolean') row.compartir_directorio = d.compartirDirectorio;
   return row;
 }
 
@@ -616,6 +631,25 @@ export async function listPublicCenters(estado) {
     .eq('estado', estado).order('nombre');
   if (error) throw error;
   return data.map(rowToPublicCenter);
+}
+
+/** Especialidades ya publicadas en el directorio compartido (migración 0028).
+ * Alimentan el desplegable de especialidad de Médicos: sin esto, aprobar una
+ * especialidad en el panel de revisión no se notaba en ninguna parte de la
+ * aplicación. La RLS solo deja ver las publicadas más las propias. */
+export async function listPublicSpecialties() {
+  const { data, error } = await supabase.from('public_specialties')
+    .select('nombre').eq('estado', 'publicado').order('nombre');
+  if (error) throw error;
+  return data.map(r => r.nombre);
+}
+
+/** ¿El error de una propuesta es "ya existe"? Puede llegar por dos caminos:
+ * el índice único de la tabla, o el `raise` del trigger antiduplicados de la
+ * migración 0028 (que usa el mismo SQLSTATE a propósito). Interesa para poder
+ * decirlo en cristiano en vez de mostrar el error crudo de Postgres. */
+export function esPropuestaDuplicada(err) {
+  return err?.code === '23505' || /ya existe una entrada con ese nombre/i.test(err?.message || '');
 }
 
 /** Propuestas de la cuenta actual (todas: pendientes, publicadas y

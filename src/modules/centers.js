@@ -5,6 +5,7 @@ import { esc, safeUrl } from '../lib/utils.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { geoFieldsHtml, wireGeoFields, fillGeoFields, readGeoFields } from '../lib/geo.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
+import { consentFieldHtml, readConsent } from '../lib/directoryConsent.js';
 
 export async function render() {
   const container = document.getElementById('view-centers');
@@ -55,7 +56,7 @@ export async function render() {
       <div class="dir-card-top">
         <div class="dir-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16"/></svg></div>
         <div style="flex:1;min-width:0"><div class="dir-name">${esc(c.nombre)}${directoryTag(c, proposedMap)}</div></div>
-        ${!c.publicSourceId && !proposedMap[c.id] ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${c.id}" title="Proponer al directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
+        ${puedeProponer(c, proposedMap) ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${c.id}" title="Proponer al directorio de la comunidad"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
         <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${c.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
         <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${c.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
       </div>
@@ -71,6 +72,16 @@ export async function render() {
   el.querySelectorAll('[data-delete-id]').forEach(b => b.addEventListener('click', () => deleteCenterConfirm(b.dataset.deleteId)));
   el.querySelectorAll('[data-propose-id]').forEach(b => b.addEventListener('click', () =>
     proposeCenterConfirm(centers.find(c => c.id === b.dataset.proposeId))));
+}
+
+/**
+ * ¿Ofrecer el botón "Proponer al directorio"? Mismo criterio que en Médicos:
+ * solo para quien dijo que NO al crear y cambió de opinión. Los que dijeron
+ * que sí ya viajaron solos (migración 0028) y reproponerlos falla siempre
+ * contra el antiduplicados.
+ */
+function puedeProponer(c, proposedMap) {
+  return c.compartirDirectorio === false && !c.publicSourceId && !proposedMap[c.id];
 }
 
 /** Etiqueta junto al nombre según la relación con el directorio público. */
@@ -110,7 +121,9 @@ function proposeCenterConfirm(c) {
           showToast('Propuesta enviada a la administradora');
           render();
         } catch (err) {
-          showToast(err.message || 'No se pudo enviar la propuesta', 'err');
+          showToast(api.esPropuestaDuplicada(err)
+            ? 'Ya está en el directorio o esperando revisión'
+            : (err.message || 'No se pudo enviar la propuesta'), 'err');
         }
       } },
     ]
@@ -129,6 +142,7 @@ function openCenterModal(id) {
         ${geoFieldsHtml('cf')}
         <div class="form-field"><label class="fl">Correo</label><input class="fi" id="cf-email" type="email" placeholder="info@clinica.com"/></div>
         <div class="form-field"><label class="fl">Sitio web</label><input class="fi" id="cf-web" type="url" placeholder="https://…"/></div>
+        ${id ? '' : consentFieldHtml({ id: 'cf-compartir', tipo: 'centro' })}
       </div>
     </div>`,
     [
@@ -153,6 +167,8 @@ async function saveCenterForm(editId) {
   if (!nombre) { showToast('El nombre es obligatorio', 'err'); return; }
   const obj = {
     id: editId || undefined,
+    // Solo al crear: al editar la casilla no está y la columna no se toca.
+    compartirDirectorio: readConsent('cf-compartir'),
     nombre,
     tel1: document.getElementById('cf-tel1').value.trim(),
     tel2: document.getElementById('cf-tel2').value.trim(),

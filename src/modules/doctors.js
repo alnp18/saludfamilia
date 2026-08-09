@@ -6,6 +6,7 @@ import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
+import { consentFieldHtml, readConsent } from '../lib/directoryConsent.js';
 
 const SP_COLORS_MAP = {
   'Cardiología': '#0e7490', 'Neurología': '#7c3aed', 'Oncología': '#b45309',
@@ -93,7 +94,7 @@ export async function render() {
             <div class="doc-detail">${d.consultorio ? esc(d.consultorio) + ' · ' : ''}${d.centroId ? esc(centerMap[d.centroId] || '') : ''}</div>
             ${d.tel ? `<div class="doc-detail">${esc(d.tel)} ${callLinkHtml(d.tel)}</div>` : ''}
           </div>
-          ${!d.publicSourceId && !proposedMap[d.id] ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${d.id}" title="Proponer al directorio público"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
+          ${puedeProponer(d, proposedMap) ? `<button class="btn btn-sm btn-icon btn-ghost" data-propose-id="${d.id}" title="Proponer al directorio de la comunidad"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 002 2h12a2 2 0 002-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg></button>` : ''}
           <button class="btn btn-sm btn-icon btn-ghost" data-edit-id="${d.id}" title="Editar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/></svg></button>
           <button class="btn btn-sm btn-icon btn-danger" data-delete-id="${d.id}" title="Eliminar"><svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862"/></svg></button>
         </div>`).join('')}
@@ -105,6 +106,22 @@ export async function render() {
   el.querySelectorAll('[data-delete-id]').forEach(b => b.addEventListener('click', () => deleteDoctorConfirm(b.dataset.deleteId)));
   el.querySelectorAll('[data-propose-id]').forEach(b => b.addEventListener('click', () =>
     proposeDoctorConfirm(docs.find(d => d.id === b.dataset.proposeId), centerMap)));
+}
+
+/**
+ * ¿Ofrecer el botón "Proponer al directorio"?
+ *
+ * Solo tiene sentido para quien dijo que NO al crear y después cambió de
+ * opinión. Los que dijeron que sí ya viajaron solos (migración 0028) y volver
+ * a proponerlos choca contra el antiduplicados: antes de esta comprobación el
+ * botón aparecía siempre y fallaba siempre.
+ *
+ * `compartirDirectorio` puede venir undefined si el registro es anterior a la
+ * migración 0030 — en ese caso se comporta como los antiguos, que ya se
+ * compartieron, y no se ofrece.
+ */
+function puedeProponer(d, proposedMap) {
+  return d.compartirDirectorio === false && !d.publicSourceId && !proposedMap[d.id];
 }
 
 /** Etiqueta junto al nombre según la relación con el directorio público. */
@@ -154,7 +171,9 @@ function proposeDoctorConfirm(d, centerMap) {
           showToast('Propuesta enviada a la administradora');
           render();
         } catch (err) {
-          showToast(err.message || 'No se pudo enviar la propuesta', 'err');
+          showToast(api.esPropuestaDuplicada(err)
+            ? 'Ya está en el directorio o esperando revisión'
+            : (err.message || 'No se pudo enviar la propuesta'), 'err');
         }
       } },
     ]
@@ -162,18 +181,26 @@ function proposeDoctorConfirm(d, centerMap) {
 }
 
 async function openDoctorModal(id) {
-  let centers, customEsp, d;
+  let centers, customEsp, publicEsp, d;
   try {
-    [centers, customEsp, d] = await Promise.all([
+    [centers, customEsp, publicEsp, d] = await Promise.all([
       api.listCenters(state.household.id),
       api.listCatalogOptions(state.household.id, CATEGORIA_ESPECIALIDAD),
+      // Especialidades ya aprobadas en el directorio compartido. No es
+      // crítico: si falla, el desplegable queda con las fijas y las propias.
+      api.listPublicSpecialties().catch(() => []),
       id ? api.getDoctor(id) : Promise.resolve(null),
     ]);
   } catch (err) {
     showToast(err.message || 'No se pudo abrir el formulario del médico', 'err');
     return;
   }
-  const knownEsp = [...SPECIALTIES, ...customEsp];
+  // Las del directorio se mezclan con las del household y se ordenan juntas:
+  // a quien llena el formulario no le importa de dónde salió cada una.
+  const extraEsp = [...new Set([...customEsp, ...publicEsp])]
+    .filter(e => !SPECIALTIES.includes(e))
+    .sort((a, b) => a.localeCompare(b));
+  const knownEsp = [...SPECIALTIES, ...extraEsp];
   // Compatibilidad: especialidad guardada que no está ni en las fijas ni
   // en el catálogo (dato viejo o importado) → se preselecciona "Otra…"
   // con el valor ya escrito, en vez de perderlo silenciosamente.
@@ -187,7 +214,7 @@ async function openDoctorModal(id) {
         <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido" value="${esc(d?.nombre || '')}"/></div>
         <div class="form-field span2"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="df-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Especialidad</label>
-          <select class="fi" id="df-esp"><option value="">Seleccione especialidad</option>${catalogOptionsHtml(SPECIALTIES, customEsp, espSelected)}</select>
+          <select class="fi" id="df-esp"><option value="">Seleccione especialidad</option>${catalogOptionsHtml(SPECIALTIES, extraEsp, espSelected)}</select>
         </div>
         <div class="form-field ${pendingEspOtra ? '' : 'hidden'}" id="df-esp-otra-field">
           <label class="fl">Especificar especialidad</label>
@@ -206,6 +233,7 @@ async function openDoctorModal(id) {
         <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="df-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
         ${phoneFieldHtml({ id: 'df-tel', label: 'Teléfono / Ext.', placeholder: 'Número directo o extensión', value: d?.tel || '' })}
         <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="df-notas" rows="2" placeholder="Horarios, indicaciones especiales…">${esc(d?.notas || '')}</textarea></div>
+        ${id ? '' : consentFieldHtml({ id: 'df-compartir', tipo: 'medico' })}
       </div>
     </div>`,
     [
@@ -227,10 +255,14 @@ async function saveDoctorForm(editId) {
   if (espSel === OTRA_VALUE && !document.getElementById('df-esp-otra').value.trim()) {
     showToast('Escribe la especialidad', 'err'); return;
   }
-  const especialidad = await resolveCatalogValue(state.household.id, CATEGORIA_ESPECIALIDAD, espSel, document.getElementById('df-esp-otra').value);
+  // La casilla solo existe al crear; al editar queda undefined y ni la
+  // especialidad nueva ni el médico tocan la columna de consentimiento.
+  const compartir = readConsent('df-compartir');
+  const especialidad = await resolveCatalogValue(state.household.id, CATEGORIA_ESPECIALIDAD, espSel, document.getElementById('df-esp-otra').value, compartir);
 
   const obj = {
     id: editId || undefined,
+    compartirDirectorio: compartir,
     nombre,
     tarjetaProfesional: document.getElementById('df-tarjeta').value.trim(),
     especialidad,

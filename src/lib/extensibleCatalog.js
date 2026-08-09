@@ -25,10 +25,15 @@ export function catalogOptionsHtml(fixedOptions, customOptions, selected) {
 
 /** Si se eligió "Otra…" y se escribió un valor, lo suma al catálogo del
  * household para que aparezca ya listado en cargas futuras. Devuelve el
- * valor final a guardar en el registro. */
-export async function resolveCatalogValue(householdId, categoria, selectValue, otraValue) {
+ * valor final a guardar en el registro.
+ *
+ * `compartir` (opcional) es la decisión de la familia sobre el directorio
+ * público: una especialidad nueva también viaja a la cola de revisión, así
+ * que debe respetar la misma casilla que el médico que la estrenó. Se ignora
+ * en las demás categorías, que no alimentan el directorio. */
+export async function resolveCatalogValue(householdId, categoria, selectValue, otraValue, compartir) {
   if (selectValue !== OTRA_VALUE) return selectValue;
   const v = (otraValue || '').trim();
-  if (v) await api.addCatalogOption(householdId, categoria, v);
+  if (v) await api.addCatalogOption(householdId, categoria, v, compartir);
   return v;
 }
