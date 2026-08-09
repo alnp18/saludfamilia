@@ -15,6 +15,7 @@ import * as Vitals from './modules/vitals.js';
 import * as Centers from './modules/centers.js';
 import * as Doctors from './modules/doctors.js';
 import * as Directory from './modules/directory.js';
+import * as Archive from './modules/archive.js';
 import * as Family from './modules/family.js';
 
 const VIEW_RENDERERS = {
@@ -25,6 +26,7 @@ const VIEW_RENDERERS = {
   centers: Centers.render,
   doctors: Doctors.render,
   directory: Directory.render,
+  archive: Archive.render,
   patients: Patients.render,
   family: Family.render,
 };
