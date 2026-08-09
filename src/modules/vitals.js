@@ -67,20 +67,16 @@ export async function render() {
         <div class="view-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Signos vitales</div>
         <div class="view-sub">Registros periódicos y evolución gráfica</div>
       </div>
-      <button class="btn btn-primary" id="btn-new-vital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nuevo registro</button>
+      <div class="view-header-actions">
+        <button class="btn btn-primary" id="btn-new-vital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nuevo registro</button>
+        <button class="btn" id="btn-vitals-history" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 106 5.3L3 8"/><path d="M12 7v5l4 2"/></svg> Ver historial</button>
+      </div>
     </div>
     <div id="vitals-kpi" class="vitals-kpi"></div>
-    <div id="vitals-tabs" class="vitals-tabs"></div>
     <div id="vitals-chart-card" class="vitals-chart-card" style="display:none">
       <div class="vchart-header"><div class="vchart-title" id="vchart-title">Evolución</div><div class="vchart-meta" id="vchart-meta"></div></div>
       <canvas id="vitals-canvas" class="no-tr" height="220"></canvas>
       <div class="vchart-footer" id="vchart-footer"></div>
-    </div>
-    <div id="vitals-table-section" style="display:none">
-      <div class="card">
-        <div class="card-hd"><h2>Historial de registros</h2><span class="card-meta" id="vitals-hist-meta"></span></div>
-        <div id="vitals-table-body" style="overflow-x:auto"></div>
-      </div>
     </div>
     <div id="vitals-empty" style="display:none"></div>
   `;
@@ -117,7 +113,6 @@ export async function render() {
     return;
   }
   document.getElementById('vitals-chart-card').style.display = 'block';
-  document.getElementById('vitals-table-section').style.display = 'block';
 
   const last = records[records.length - 1];
   const prev = records.length > 1 ? records[records.length - 2] : null;
@@ -136,18 +131,18 @@ export async function render() {
     </div>`;
   }).join('');
 
-  document.getElementById('vitals-tabs').innerHTML = VITAL_FIELDS.map(f => {
-    const hasData = records.some(r => getVitalNumeric(r, f.key) != null);
-    return `<div class="vtab ${vActiveField === f.key ? 'active' : ''}" style="${vActiveField === f.key ? 'background:' + f.color + ';border-color:' + f.color : ''};${!hasData ? 'opacity:.5' : ''}" data-select-field="${f.key}">
-      <span class="vtab-dot" style="background:${f.color}"></span>${f.label}
-    </div>`;
-  }).join('');
-
   document.querySelectorAll('[data-select-field]').forEach(el =>
     el.addEventListener('click', () => { vActiveField = el.dataset.selectField; render(); }));
 
   renderVitalsChart(records);
-  renderVitalsTable(records);
+
+  // Historial: antes era una tabla siempre desplegada debajo del gráfico, con
+  // once columnas y una fila por registro. Con el uso se volvía la mitad de la
+  // pantalla y tapaba lo que se mira a diario (los últimos valores y la
+  // evolución). Ahora se consulta cuando se necesita — auditoría móvil, Fase 5.
+  const btnHist = document.getElementById('btn-vitals-history');
+  btnHist.style.display = '';
+  btnHist.onclick = () => openVitalsHistoryModal(records);
 
   if (pendingOptions?.openModal) { pendingOptions = null; openVitalModal(); }
 }
@@ -267,9 +262,9 @@ function renderVitalsChart(records) {
   ].map(([l, v]) => `<div class="vcf-stat"><div class="vcf-label">${l}</div><div class="vcf-val">${v}</div></div>`).join('');
 }
 
-function renderVitalsTable(records) {
+/** Tabla del historial, del registro más reciente al más viejo. */
+function vitalsTableHtml(records) {
   const sorted = [...records].reverse();
-  document.getElementById('vitals-hist-meta').textContent = sorted.length + ' registro' + (sorted.length !== 1 ? 's' : '');
 
   const COLS = [
     { key: 'fecha', label: 'Fecha', fmt: v => fmtDate(v) },
@@ -303,9 +298,33 @@ function renderVitalsTable(records) {
     </td></tr>`;
   }).join('');
 
-  document.getElementById('vitals-table-body').innerHTML = `<table class="vitals-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
-  document.querySelectorAll('[data-edit-vital]').forEach(b => b.addEventListener('click', () => openVitalModal(b.dataset.editVital)));
-  document.querySelectorAll('[data-delete-vital]').forEach(b => b.addEventListener('click', () => deleteVitalConfirm(b.dataset.deleteVital)));
+  return `<table class="vitals-table"><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+function openVitalsHistoryModal(records) {
+  showModal(
+    `Historial de registros`,
+    `<div class="form-body">
+      <p style="font-size:12px;color:var(--ts);margin:0 0 10px">${records.length} registro${records.length !== 1 ? 's' : ''}, del más reciente al más antiguo.</p>
+      <div style="overflow-x:auto">${vitalsTableHtml(records)}</div>
+    </div>`,
+    [{ label: 'Cerrar', cls: 'btn', action: closeModal }]
+  );
+  setModalMaxWidth('960px');
+
+  // Editar y eliminar cierran el historial antes de seguir: los dos usan este
+  // mismo overlay, así que dejarlo abierto detrás no es posible — y volver a
+  // una tabla desactualizada tampoco sería lo que se espera.
+  document.querySelectorAll('[data-edit-vital]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.editVital;
+    closeModal();
+    openVitalModal(id);
+  }));
+  document.querySelectorAll('[data-delete-vital]').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.deleteVital;
+    closeModal();
+    deleteVitalConfirm(id);
+  }));
 }
 
 async function openVitalModal(id) {

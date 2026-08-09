@@ -223,6 +223,8 @@ body {
 .view { display:none; flex-direction:column; padding: 24px 28px; gap: 16px; }
 .view.active { display: flex; }
 .view-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+/* Varios botones de acción en la cabecera de una vista (Signos vitales). */
+.view-header-actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 .view-title {
   font-size: 20px; font-weight: 700; letter-spacing: -.4px;
   display: flex; align-items: center; gap: 10px;
@@ -1019,11 +1021,6 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .vkpi-trend.down { color:var(--green-lt); }
 .vkpi-trend.same { color:var(--ts); }
 
-.vitals-tabs { display:flex; gap:6px; flex-wrap:wrap; }
-.vtab { padding:6px 13px; border-radius:20px; font-size:12.5px; font-weight:600; border:1px solid var(--border); background:var(--card); color:var(--ts); cursor:pointer; display:flex; align-items:center; gap:5px; }
-.vtab:hover { color:var(--tp); border-color:var(--border-lt); }
-.vtab.active { color:#fff; border-color:transparent; background:var(--t-primary); }
-.vtab-dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
 
 .vitals-chart-card { background:var(--card); border:1px solid var(--border); border-radius:var(--r); overflow:hidden; }
 .vchart-header { padding:14px 18px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }

@@ -31,6 +31,10 @@ const MODAL_ICON_PATHS = {
  * (nunca innerHTML) para que nunca se renderice como código visible.
  */
 export function showModal(title, bodyHtml, buttons = []) {
+  // El ancho es por modal: se limpia acá para que el que fijó setModalMaxWidth
+  // (Órdenes, Signos vitales) no se lo deje puesto al siguiente, que puede ser
+  // un formulario angosto.
+  document.getElementById('modal').style.maxWidth = '';
   document.getElementById('modal-title').textContent = title;
 
   const tl = title.toLowerCase();
