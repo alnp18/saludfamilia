@@ -148,12 +148,6 @@ body {
 }
 .hdr-btn:hover { border-color: var(--t-primary); color: var(--t-primary-lt); background: var(--card2); }
 .hdr-btn svg { width: 17px; height: 17px; }
-.notif-dot {
-  position: absolute; top: 5px; right: 5px;
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--red-lt); border: 2px solid var(--surface); display: none;
-}
-
 /* ══ PATIENT DROPDOWN ══ */
 #no-patient-banner {
   background: rgba(245,158,11,.10); border-bottom: 1px solid rgba(245,158,11,.20);
