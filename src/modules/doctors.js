@@ -3,7 +3,7 @@ import * as api from '../lib/api.js';
 import { showModal, closeModal, showToast } from '../lib/modal.js';
 import { esc } from '../lib/utils.js';
 import { wireInlineNewCenter } from '../lib/inlineDirectory.js';
-import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
+import { catalogOptionsHtml, resolveCatalogValue, mergeCatalogOptions, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { callLinkHtml, phoneFieldHtml } from '../lib/phone.js';
 import { consentFieldHtml, readConsent } from '../lib/directoryConsent.js';
@@ -189,12 +189,8 @@ async function openDoctorModal(id) {
     showToast(err.message || 'No se pudo abrir el formulario del médico', 'err');
     return;
   }
-  // Las del directorio se mezclan con las del household y se ordenan juntas:
-  // a quien llena el formulario no le importa de dónde salió cada una.
-  const extraEsp = [...new Set([...customEsp, ...publicEsp])]
-    .filter(e => !SPECIALTIES.includes(e))
-    .sort((a, b) => a.localeCompare(b));
-  const knownEsp = [...SPECIALTIES, ...extraEsp];
+  // Fijas + del household + del directorio compartido, en una sola lista A-Z.
+  const knownEsp = mergeCatalogOptions(SPECIALTIES, customEsp, publicEsp);
   // Compatibilidad: especialidad guardada que no está ni en las fijas ni
   // en el catálogo (dato viejo o importado) → se preselecciona "Otra…"
   // con el valor ya escrito, en vez de perderlo silenciosamente.
@@ -208,7 +204,7 @@ async function openDoctorModal(id) {
         <div class="form-field span2"><label class="fl">Nombre completo *</label><input class="fi" id="df-nombre" type="text" placeholder="Dr. / Dra. Nombre Apellido" value="${esc(d?.nombre || '')}"/></div>
         <div class="form-field span2"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="df-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Especialidad</label>
-          <select class="fi" id="df-esp"><option value="">Seleccione especialidad</option>${catalogOptionsHtml(SPECIALTIES, extraEsp, espSelected)}</select>
+          <select class="fi" id="df-esp"><option value="">Seleccione especialidad</option>${catalogOptionsHtml(knownEsp, [], espSelected)}</select>
         </div>
         <div class="form-field ${pendingEspOtra ? '' : 'hidden'}" id="df-esp-otra-field">
           <label class="fl">Especificar especialidad</label>

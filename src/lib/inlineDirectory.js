@@ -5,6 +5,9 @@ import { showToast, openStackedModal, closeStackedModal } from './modal.js';
 import { callInputButtonHtml } from './phone.js';
 import { invalidarCacheMedicos } from './searches.js';
 import { consentFieldHtml, readConsentIn } from './directoryConsent.js';
+import { catalogOptionsHtml, resolveCatalogValue, mergeCatalogOptions, OTRA_VALUE } from './extensibleCatalog.js';
+
+const CATEGORIA_ESPECIALIDAD = 'especialidad';
 
 /**
  * Alta rápida de centro médico o médico "sin salir del flujo" (P1.5 —
@@ -155,7 +158,16 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
   };
 
   const abrir = async (nombrePrefill = '') => {
-    const centers = await api.listCenters(state.household.id);
+    // Mismas tres fuentes que el formulario completo de Médicos: las fijas, las
+    // que la familia agregó con "Otra…" y las publicadas en el directorio
+    // compartido. Antes acá solo llegaban las fijas, así que una especialidad
+    // registrada desde Médicos no aparecía al dar de alta desde una orden.
+    const [centers, customEsp, publicEsp] = await Promise.all([
+      api.listCenters(state.household.id),
+      api.listCatalogOptions(state.household.id, CATEGORIA_ESPECIALIDAD).catch(() => []),
+      api.listPublicSpecialties().catch(() => []),
+    ]);
+    const especialidades = mergeCatalogOptions(specialties, customEsp, publicEsp);
     container.classList.remove('hidden');
     container.innerHTML = `
       <div class="form-row cols-2" style="margin-top:8px">
@@ -163,8 +175,11 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
         <div class="form-field">
           <select class="fi" id="${formContainerId}-esp">
             <option value="">Seleccione especialidad</option>
-            ${specialties.map(s => `<option>${esc(s)}</option>`).join('')}
+            ${catalogOptionsHtml(especialidades, [], '')}
           </select>
+        </div>
+        <div class="form-field hidden" id="${formContainerId}-esp-otra-field">
+          <input class="fi" id="${formContainerId}-esp-otra" type="text" placeholder="Escribe la especialidad *"/>
         </div>
         <div class="form-field">
           <div style="display:flex;gap:6px">
@@ -188,14 +203,29 @@ export function wireInlineNewDoctor({ primarySelectId, otherSelectIds = [], addB
     document.getElementById(`${formContainerId}-centro-add`).addEventListener('click', () =>
       openNewCenterModal({ onSaved: (saved) => inyectarCentroEnSelect(`${formContainerId}-centro`, saved) }));
 
+    // "Otra…" abre el campo libre. Lo que se escriba se suma al catálogo del
+    // household al guardar, así que la próxima vez ya está en la lista.
+    document.getElementById(`${formContainerId}-esp`).addEventListener('change', (e) => {
+      document.getElementById(`${formContainerId}-esp-otra-field`)
+        .classList.toggle('hidden', e.target.value !== OTRA_VALUE);
+    });
+
     document.getElementById(`${formContainerId}-cancel`).addEventListener('click', cerrar);
     document.getElementById(`${formContainerId}-save`).addEventListener('click', async () => {
       const nombre = document.getElementById(`${formContainerId}-nombre`).value.trim();
       if (!nombre) { showToast('El nombre del médico es obligatorio', 'err'); return; }
-      const especialidad = document.getElementById(`${formContainerId}-esp`).value;
+      const espSel = document.getElementById(`${formContainerId}-esp`).value;
+      const espOtra = document.getElementById(`${formContainerId}-esp-otra`).value;
+      if (espSel === OTRA_VALUE && !espOtra.trim()) {
+        showToast('Escribe la especialidad', 'err'); return;
+      }
       const centroId = document.getElementById(`${formContainerId}-centro`).value;
       try {
         const compartir = readConsentIn(container, `${formContainerId}-compartir`);
+        // La especialidad nueva sigue la misma decisión de compartir que el
+        // médico que la estrena: las dos salen del mismo formulario.
+        const especialidad = await resolveCatalogValue(
+          state.household.id, CATEGORIA_ESPECIALIDAD, espSel, espOtra, compartir);
         const saved = await api.saveDoctor({ nombre, especialidad, centroId, compartirDirectorio: compartir }, state.household.id);
         [primarySelectId, ...otherSelectIds].filter(Boolean).forEach(id => {
           const select = document.getElementById(id);

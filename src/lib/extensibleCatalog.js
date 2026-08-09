@@ -13,6 +13,33 @@ import * as api from './api.js';
 
 export const OTRA_VALUE = '__otra__';
 
+/**
+ * Une varias fuentes de opciones en una sola lista ordenada A-Z.
+ *
+ * Las especialidades llegan de tres lados —las fijas del código, las que la
+ * familia agregó con "Otra…" y las publicadas en el directorio compartido— y
+ * quien llena el formulario no tiene por qué saber de dónde salió cada una:
+ * las quiere alfabéticas para encontrarlas sin leer la lista entera.
+ *
+ * El duplicado se descarta comparando en minúsculas y sin espacios sobrantes,
+ * porque las tres fuentes se escriben por separado y "Cardiología" puede llegar
+ * dos veces con distinta capitalización. Gana la primera aparición, así que
+ * conviene pasar primero la lista fija, que es la de ortografía cuidada.
+ */
+export function mergeCatalogOptions(...listas) {
+  const vistos = new Set();
+  const salida = [];
+  for (const v of listas.flat()) {
+    const limpio = (v || '').trim();
+    if (!limpio) continue;
+    const clave = limpio.toLowerCase();
+    if (vistos.has(clave)) continue;
+    vistos.add(clave);
+    salida.push(limpio);
+  }
+  return salida.sort((a, b) => a.localeCompare(b, 'es'));
+}
+
 /** Arma las <option> de un <select>: fijas + del catálogo del household
  * (sin duplicar las fijas) + "Otra…" al final. */
 export function catalogOptionsHtml(fixedOptions, customOptions, selected) {
