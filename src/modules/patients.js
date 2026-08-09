@@ -3,7 +3,7 @@ import { ThemeEngine } from '../lib/theme.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
-import { showModal, closeModal, showToast } from '../lib/modal.js';
+import { showModal, closeModal, showToast, openStackedModal, closeStackedModal } from '../lib/modal.js';
 import { esc, initials, avatarColor, calcAge, fmtDate, nombreContactoEmergencia } from '../lib/utils.js';
 import { catalogOptionsHtml, resolveCatalogValue, OTRA_VALUE } from '../lib/extensibleCatalog.js';
 import { hydrateAvatar, hydrateAvatarsIn, invalidateAvatarCache } from '../lib/avatar.js';
@@ -24,7 +24,9 @@ export function setActivePatientSetter(fn) { setActivePatientCb = fn; }
 // vía la opción "Otra…", que queda disponible para cargas futuras. Mismo
 // patrón "Otra… extensible" que Vía de administración (Medicamentos) y
 // Especialidad (Médicos) — ver nota transversal del plan (src/lib/extensibleCatalog.js).
-const POLICY_TYPES_FIJOS = ['SOAT', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'Vida', 'Dental'];
+// Orden alfabético (auditoría móvil — Fase 5): la lista había crecido sin
+// criterio y buscar un tipo en un desplegable desordenado obliga a leerlo entero.
+const POLICY_TYPES_FIJOS = ['Dental', 'Funeraria', 'Medicina prepagada', 'Servicios Médicos Complementarios', 'SOAT', 'Vida'];
 const CATEGORIA_POLIZA = 'poliza_tipo';
 // Proporción tipo tarjeta (auditoría 2026-07-17 — el carnet ya no se
 // convierte a PDF, se recorta como imagen con este marco guía).
@@ -48,14 +50,12 @@ const TIPO_DOCUMENTO_OPTIONS = [
 // ficha de paciente. Es un solo modal (ver modal.js), así que este
 // mini-formulario vive inline (no como un segundo modal apilado) y
 // persiste entre los re-renders de la sección de pólizas.
-let policyFormOpen = false;
 let editingPolicy = null;      // objeto completo de la póliza si se está editando una existente; null si es nueva (auditoría 2026-07-17)
 // Valor actual del <select> de tipo. Se guarda explícito (no solo un flag
 // "es Otra") porque el <select> se reconstruye desde cero en cada
 // re-render: si `selected` no refleja la última elección del usuario, el
 // navegador vuelve a marcar la primera opción (bug reportado 2026-07-17 —
 // cambiar de tipo no dejaba salir de "SOAT").
-let pendingPolicyTipo = '';
 let pendingPolicyImage = null;          // { name, type, data } recién elegida (y recortada, si era imagen), sin subir
 let pendingPolicyImageRemoved = false;  // al editar: se quitó la imagen existente sin reemplazarla
 
@@ -419,9 +419,7 @@ async function openPatientViewMode(id) {
 
 function openPatientModal(id) {
   const editing = !!id;
-  policyFormOpen = false;
   editingPolicy = null;
-  pendingPolicyTipo = '';
   pendingPolicyImage = null;
   pendingPolicyImageRemoved = false;
   currentAvatarFoto = null;
@@ -745,49 +743,9 @@ async function renderPoliciesSection(patientId) {
       </div>
     </div>`).join('') : `<p style="font-size:12.5px;color:var(--ts);margin:0 0 8px">Sin pólizas registradas.</p>`;
 
-  const isOtra = pendingPolicyTipo === OTRA_VALUE;
-  const hasExistingImage = !!editingPolicy?.imagen && !pendingPolicyImageRemoved && !pendingPolicyImage;
-  const hasPendingImage = !!pendingPolicyImage;
-
   container.innerHTML = `
     <div id="pf-policies-list">${listHtml}</div>
-    ${policyFormOpen ? `
-      <div class="form-row cols-2" style="margin-top:8px">
-        <div class="form-field">
-          <label class="fl">Tipo de póliza</label>
-          <select class="fi" id="pf-policy-tipo"><option value="">Seleccione tipo de póliza</option>${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, pendingPolicyTipo)}</select>
-        </div>
-        <div class="form-field ${isOtra ? '' : 'hidden'}">
-          <label class="fl">Especificar tipo</label>
-          <input class="fi" id="pf-policy-tipo-otra" type="text" placeholder="Ej: Cooperativa X" value="${isOtra && editingPolicy ? esc(editingPolicy.tipo) : ''}"/>
-        </div>
-        <div class="form-field">
-          <label class="fl">Número de póliza</label>
-          <input class="fi" id="pf-policy-numero" type="text" value="${editingPolicy ? esc(editingPolicy.numeroPoliza || '') : ''}"/>
-        </div>
-        <div class="form-field">
-          <label class="fl">Nombre de la aseguradora</label>
-          <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…" value="${editingPolicy ? esc(editingPolicy.aseguradora || '') : ''}"/>
-        </div>
-        ${dateRangeFieldHtml('pf-policy-vigencia', { label: 'Vigencia' })}
-        <div class="form-field span2">
-          <label class="fl">Foto del carnet (o PDF ya escaneado)</label>
-          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <label class="btn btn-sm" for="pf-policy-imagen" style="cursor:pointer">${hasExistingImage || hasPendingImage ? 'Reemplazar' : 'Subir'} imagen</label>
-            <input id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none"/>
-            <button type="button" class="btn btn-sm btn-icon" id="pf-policy-imagen-cam-btn" title="Tomar foto"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
-            <input type="file" id="pf-policy-imagen-cam" accept="image/*" capture="environment" style="display:none"/>
-            ${hasExistingImage ? '<button type="button" class="btn btn-sm btn-ghost" id="pf-policy-imagen-view-btn">Ver actual</button>' : ''}
-            ${(hasExistingImage || hasPendingImage) ? '<button type="button" class="btn btn-sm" id="pf-policy-imagen-remove-btn">Quitar</button>' : ''}
-          </div>
-          ${hasPendingImage ? `<p style="font-size:11.5px;color:var(--ts);margin:4px 0 0">Nueva imagen lista: ${esc(pendingPolicyImage.name)}</p>` : ''}
-        </div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:8px">
-        <button type="button" class="btn btn-sm btn-primary" id="pf-policy-save-btn">${editingPolicy ? 'Guardar cambios' : 'Guardar póliza'}</button>
-        <button type="button" class="btn btn-sm" id="pf-policy-cancel-btn">Cancelar</button>
-      </div>
-    ` : `<button type="button" class="btn btn-sm" id="pf-policy-add-btn" style="margin-top:8px">+ Agregar póliza</button>`}
+    <button type="button" class="btn btn-sm" id="pf-policy-add-btn" style="margin-top:8px">+ Agregar póliza</button>
   `;
 
   container.querySelectorAll('[data-delete-policy]').forEach(el =>
@@ -800,45 +758,113 @@ async function renderPoliciesSection(patientId) {
   container.querySelectorAll('[data-edit-policy]').forEach(el =>
     el.addEventListener('click', () => {
       const pol = policies.find(x => x.id === el.dataset.editPolicy);
-      if (!pol) return;
-      const known = [...POLICY_TYPES_FIJOS, ...customTypes.filter(c => !POLICY_TYPES_FIJOS.includes(c))];
-      editingPolicy = pol;
-      pendingPolicyTipo = known.includes(pol.tipo) ? pol.tipo : OTRA_VALUE;
-      pendingPolicyImage = null;
-      pendingPolicyImageRemoved = false;
-      policyFormOpen = true;
-      renderPoliciesSection(patientId);
+      if (pol) openPolicyModal(patientId, pol, customTypes);
     }));
+  document.getElementById('pf-policy-add-btn')
+    .addEventListener('click', () => openPolicyModal(patientId, null, customTypes));
+}
 
-  if (policyFormOpen) {
-    wireDateRangeField('pf-policy-vigencia');
-    fillDateRangeField('pf-policy-vigencia', editingPolicy?.fechaInicio, editingPolicy?.fechaFin);
-    document.getElementById('pf-policy-tipo').addEventListener('change', (e) => {
-      pendingPolicyTipo = e.target.value;
-      renderPoliciesSection(patientId);
-    });
-    document.getElementById('pf-policy-save-btn').addEventListener('click', () => savePolicyInline(patientId));
-    document.getElementById('pf-policy-cancel-btn').addEventListener('click', () => {
-      policyFormOpen = false;
-      editingPolicy = null;
-      pendingPolicyTipo = '';
-      pendingPolicyImage = null;
-      pendingPolicyImageRemoved = false;
-      renderPoliciesSection(patientId);
-    });
-    document.getElementById('pf-policy-imagen-view-btn')?.addEventListener('click', () => {
+function limpiarEstadoPoliza() {
+  editingPolicy = null;
+  pendingPolicyImage = null;
+  pendingPolicyImageRemoved = false;
+}
+
+/**
+ * Formulario de póliza en ventana sobrepuesta (auditoría móvil — Fase 5).
+ *
+ * Antes vivía al final de la ficha del paciente: al tocar "Editar" en una
+ * póliza el formulario aparecía abajo de todo y había que buscarlo scrolleando
+ * un modal ya largo. Ahora se abre encima, sobre la lista, donde estaba la
+ * mirada.
+ *
+ * El cambio arregla de paso un defecto que traía la versión en línea: aquella
+ * se repintaba entera con cada cambio de tipo o de imagen, y al repintarse
+ * releía los valores de la póliza guardada — así que escribir el número y
+ * después elegir el tipo borraba el número. Acá el formulario se construye una
+ * sola vez; lo único que se repinta es la zona de la imagen, que no tiene
+ * campos de texto que perder.
+ */
+function openPolicyModal(patientId, pol, customTypes) {
+  editingPolicy = pol || null;
+  pendingPolicyImage = null;
+  pendingPolicyImageRemoved = false;
+
+  const known = [...POLICY_TYPES_FIJOS, ...customTypes.filter(c => !POLICY_TYPES_FIJOS.includes(c))];
+  // Compatibilidad: un tipo guardado que ya no está en el catálogo (dato viejo
+  // o importado) se preselecciona como "Otra…" con el valor escrito, en vez de
+  // perderse sin aviso — mismo criterio que la especialidad en Médicos.
+  const isOtra = !!(pol?.tipo && !known.includes(pol.tipo));
+  const tipoInicial = isOtra ? OTRA_VALUE : (pol?.tipo || '');
+
+  const overlay = openStackedModal(
+    pol ? 'Editar póliza' : 'Nueva póliza',
+    `<div class="form-row cols-2">
+      <div class="form-field">
+        <label class="fl">Tipo de póliza</label>
+        <select class="fi" id="pf-policy-tipo"><option value="">Seleccione tipo de póliza</option>${catalogOptionsHtml(POLICY_TYPES_FIJOS, customTypes, tipoInicial)}</select>
+      </div>
+      <div class="form-field ${isOtra ? '' : 'hidden'}" id="pf-policy-tipo-otra-field">
+        <label class="fl">Especificar tipo</label>
+        <input class="fi" id="pf-policy-tipo-otra" type="text" placeholder="Ej: Cooperativa X" value="${isOtra ? esc(pol.tipo) : ''}"/>
+      </div>
+      <div class="form-field">
+        <label class="fl">Número de contrato</label>
+        <input class="fi" id="pf-policy-numero" type="text" value="${esc(pol?.numeroPoliza || '')}"/>
+      </div>
+      <div class="form-field">
+        <label class="fl">Nombre de la aseguradora</label>
+        <input class="fi" id="pf-policy-aseguradora" type="text" placeholder="Ej: Sura, Colpatria…" value="${esc(pol?.aseguradora || '')}"/>
+      </div>
+      ${dateRangeFieldHtml('pf-policy-vigencia', { label: 'Vigencia' })}
+      <div class="form-field span2">
+        <label class="fl">Foto del carnet (o PDF ya escaneado)</label>
+        <div id="pf-policy-imagen-zona"></div>
+      </div>
+    </div>`,
+    [
+      { label: 'Cancelar', cls: 'btn', action: () => closeStackedModal() },
+      { label: pol ? 'Guardar cambios' : 'Guardar póliza', cls: 'btn btn-primary',
+        action: () => savePolicyInline(patientId) },
+    ],
+    { maxWidth: '620px', onClose: limpiarEstadoPoliza }
+  );
+
+  wireDateRangeField('pf-policy-vigencia');
+  fillDateRangeField('pf-policy-vigencia', pol?.fechaInicio, pol?.fechaFin);
+
+  overlay.querySelector('#pf-policy-tipo').addEventListener('change', (e) => {
+    overlay.querySelector('#pf-policy-tipo-otra-field')
+      .classList.toggle('hidden', e.target.value !== OTRA_VALUE);
+  });
+
+  /** Solo la zona de la imagen se repinta; el resto del formulario no se toca. */
+  function pintarZonaImagen() {
+    const zona = overlay.querySelector('#pf-policy-imagen-zona');
+    const hasExistingImage = !!editingPolicy?.imagen && !pendingPolicyImageRemoved && !pendingPolicyImage;
+    const hasPendingImage = !!pendingPolicyImage;
+    zona.innerHTML = `
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+        <label class="btn btn-sm" for="pf-policy-imagen" style="cursor:pointer">${hasExistingImage || hasPendingImage ? 'Reemplazar' : 'Subir'} imagen</label>
+        <input id="pf-policy-imagen" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" style="display:none"/>
+        <button type="button" class="btn btn-sm btn-icon" id="pf-policy-imagen-cam-btn" title="Tomar foto"><svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg></button>
+        <input type="file" id="pf-policy-imagen-cam" accept="image/*" capture="environment" style="display:none"/>
+        ${hasExistingImage ? '<button type="button" class="btn btn-sm btn-ghost" id="pf-policy-imagen-view-btn">Ver actual</button>' : ''}
+        ${(hasExistingImage || hasPendingImage) ? '<button type="button" class="btn btn-sm" id="pf-policy-imagen-remove-btn">Quitar</button>' : ''}
+      </div>
+      ${hasPendingImage ? `<p style="font-size:11.5px;color:var(--ts);margin:4px 0 0">Nueva imagen lista: ${esc(pendingPolicyImage.name)}</p>` : ''}`;
+
+    zona.querySelector('#pf-policy-imagen-view-btn')?.addEventListener('click', () => {
       if (editingPolicy?.imagen) openAttachmentViewer(editingPolicy.imagen);
     });
-    document.getElementById('pf-policy-imagen-remove-btn')?.addEventListener('click', () => {
+    zona.querySelector('#pf-policy-imagen-remove-btn')?.addEventListener('click', () => {
       if (pendingPolicyImage) pendingPolicyImage = null;
       else pendingPolicyImageRemoved = true;
-      renderPoliciesSection(patientId);
+      pintarZonaImagen();
     });
     // Auditoría 2026-07-17: el carnet ya no se convierte a PDF — si es una
     // imagen, pasa por el recortador (para poder encuadrarla) y se guarda
-    // como imagen; si es un PDF ya escaneado, se sube tal cual (mismo
-    // criterio que antes tenía processUploadFile para archivos que ya
-    // llegaban en PDF).
+    // como imagen; si es un PDF ya escaneado, se sube tal cual.
     const handlePolicyFileChange = async (e) => {
       const file = e.target.files[0];
       e.target.value = '';
@@ -851,7 +877,7 @@ async function renderPoliciesSection(patientId) {
         const dataUrl = await files.blobToDataUrl(file);
         pendingPolicyImage = { name: file.name, type: file.type, data: dataUrl };
         pendingPolicyImageRemoved = false;
-        renderPoliciesSection(patientId);
+        pintarZonaImagen();
         return;
       }
       if (!files.validateImageFile(file)) return;
@@ -866,21 +892,16 @@ async function renderPoliciesSection(patientId) {
       const name = file.name.replace(/\.[^.]+$/, '') + '.jpg';
       pendingPolicyImage = { name, type: 'image/jpeg', data: cropped };
       pendingPolicyImageRemoved = false;
-      renderPoliciesSection(patientId);
+      pintarZonaImagen();
     };
-    document.getElementById('pf-policy-imagen').addEventListener('change', handlePolicyFileChange);
-    document.getElementById('pf-policy-imagen-cam').addEventListener('change', handlePolicyFileChange);
-    document.getElementById('pf-policy-imagen-cam-btn').addEventListener('click', () => document.getElementById('pf-policy-imagen-cam').click());
-  } else {
-    document.getElementById('pf-policy-add-btn').addEventListener('click', () => {
-      policyFormOpen = true;
-      editingPolicy = null;
-      pendingPolicyTipo = '';
-      pendingPolicyImage = null;
-      pendingPolicyImageRemoved = false;
-      renderPoliciesSection(patientId);
-    });
+    zona.querySelector('#pf-policy-imagen').addEventListener('change', handlePolicyFileChange);
+    zona.querySelector('#pf-policy-imagen-cam').addEventListener('change', handlePolicyFileChange);
+    zona.querySelector('#pf-policy-imagen-cam-btn')
+      .addEventListener('click', () => zona.querySelector('#pf-policy-imagen-cam').click());
   }
+  pintarZonaImagen();
+
+  setTimeout(() => overlay.querySelector('#pf-policy-tipo')?.focus(), 50);
 }
 
 async function savePolicyInline(patientId) {
@@ -911,11 +932,7 @@ async function savePolicyInline(patientId) {
     if (oldImagePath && oldImagePath !== saved.imagen?.path) {
       files.removeAttachments([oldImagePath]);
     }
-    policyFormOpen = false;
-    editingPolicy = null;
-    pendingPolicyTipo = '';
-    pendingPolicyImage = null;
-    pendingPolicyImageRemoved = false;
+    closeStackedModal(); // dispara limpiarEstadoPoliza()
     showToast(wasEditing ? 'Póliza actualizada' : 'Póliza agregada');
     renderPoliciesSection(patientId);
   } catch (err) {
@@ -930,15 +947,9 @@ async function deletePolicyConfirm(id, patientId) {
     const pol = policies.find(x => x.id === id);
     await api.deletePatientPolicy(id);
     if (pol?.imagen?.path) files.removeAttachments([pol.imagen.path]);
-    // Si el formulario de edición estaba abierto justo para esta póliza, se
+    // Si la ventana de edición estaba abierta justo para esta póliza, se
     // cierra — ya no existe nada que guardar.
-    if (editingPolicy?.id === id) {
-      policyFormOpen = false;
-      editingPolicy = null;
-      pendingPolicyTipo = '';
-      pendingPolicyImage = null;
-      pendingPolicyImageRemoved = false;
-    }
+    if (editingPolicy?.id === id) closeStackedModal();
     showToast('Póliza eliminada', 'warn');
     renderPoliciesSection(patientId);
   } catch (err) {

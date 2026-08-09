@@ -183,9 +183,9 @@ async function generateInvite() {
     `<div class="form-body" style="text-align:center">
       <div class="fam-code" id="invite-code-box">${esc(code)}</div>
       <p class="fam-join-help" style="margin-top:12px">
-        Compartí este código con la persona que querés sumar. Vale por 7 días
+        Comparte este código con la persona que quieras sumar. Vale por 7 días
         y un solo uso, y no se puede volver a consultar: si se pierde,
-        simplemente generá otro. La persona debe crear su cuenta (o iniciar
+        simplemente genera otro. La persona debe crear su cuenta (o iniciar
         sesión) y canjearlo en Familia → "Unirse a otra familia".
       </p>
     </div>`,

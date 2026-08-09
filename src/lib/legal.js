@@ -30,10 +30,10 @@ const LEGAL_HTML = `
   reglas de acceso.</p>
 
   <p><strong>Tu control sobre los datos.</strong>
-  Podés exportar la información de cualquier paciente en cualquier
-  momento como un archivo cifrado con una contraseña que vos elegís
-  (sección Familia → Exportar/Importar). Si querés eliminar información,
-  podés borrarla directamente desde cada módulo (pacientes, órdenes,
+  Puedes exportar la información de cualquier paciente en cualquier
+  momento como un archivo cifrado con una contraseña que tú eliges
+  (sección Familia → Exportar/Importar). Si quieres eliminar información,
+  puedes borrarla directamente desde cada módulo (pacientes, órdenes,
   medicamentos, etc.).</p>
 
   <p class="legal-fineprint">Este es un proyecto personal, no un producto
