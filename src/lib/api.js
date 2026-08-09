@@ -476,7 +476,6 @@ function rowToPublicDoctor(r) {
   return {
     id: r.id, nombre: r.nombre, especialidad: r.especialidad,
     tarjetaProfesional: r.tarjeta_profesional, centro: r.centro,
-    consultorio: r.consultorio, tel: r.telefono, notas: r.notas,
     estado: r.estado, propuestoPor: r.propuesto_por,
     origenPrivadoId: r.origen_privado_id, notaRevision: r.nota_revision,
     creadoEn: r.created_at,
@@ -486,8 +485,7 @@ function publicDoctorToRow(d) {
   return {
     nombre: d.nombre, especialidad: d.especialidad || null,
     tarjeta_profesional: d.tarjetaProfesional || null,
-    centro: d.centro || null, consultorio: d.consultorio || null,
-    telefono: d.tel || null, notas: d.notas || null,
+    centro: d.centro || null,
   };
 }
 function rowToPublicCenter(r) {
@@ -519,9 +517,9 @@ export const CAMPOS_PUBLIC_DOCTOR = [
   { campo: 'especialidad', label: 'Especialidad', prop: 'especialidad' },
   { campo: 'tarjeta_profesional', label: 'Tarjeta profesional', prop: 'tarjetaProfesional' },
   { campo: 'centro', label: 'Centro médico', prop: 'centro' },
-  { campo: 'consultorio', label: 'Consultorio', prop: 'consultorio' },
-  { campo: 'telefono', label: 'Teléfono', prop: 'tel' },
-  { campo: 'notas', label: 'Notas', prop: 'notas' },
+  // Consultorio, teléfono y notas NO están: son datos del household, no del
+  // profesional, y desde la migración 0031 ni siquiera existen como columna
+  // en public_doctors.
 ];
 
 export const CAMPOS_PUBLIC_CENTER = [

@@ -50,9 +50,8 @@ export async function copiarMedicoPublico(pd) {
     especialidad: pd.especialidad || '',
     tarjetaProfesional: pd.tarjetaProfesional || '',
     centroId: match ? match.id : '',
-    consultorio: pd.consultorio || '',
-    tel: pd.tel || '',
-    notas: pd.notas || '',
+    // Consultorio, teléfono y notas nacen vacíos: son datos de cada familia y
+    // el directorio compartido no los guarda (migración 0031).
     publicSourceId: pd.id,
   }, state.household.id);
   invalidarCacheMedicos();

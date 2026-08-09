@@ -143,14 +143,11 @@ function proposeDoctorConfirm(d, centerMap) {
     ['Especialidad', d.especialidad],
     ['Tarjeta profesional', d.tarjetaProfesional],
     ['Centro médico', centroTexto],
-    ['Consultorio', d.consultorio],
-    ['Teléfono', d.tel],
-    ['Notas', d.notas],
   ].filter(([, v]) => v);
   showModal(
     'Proponer al directorio público',
     `<div class="form-body">
-      <p style="font-size:12.5px;color:var(--ts);margin:0 0 12px">Se enviará esta información a la administradora, que la revisará antes de publicarla para todas las familias. Tu registro privado no se modifica.</p>
+      <p style="font-size:12.5px;color:var(--ts);margin:0 0 12px">Se enviará <strong>solo</strong> esta información a la administradora, que la revisará antes de publicarla para todas las familias. El consultorio, el teléfono y tus notas no salen. Tu registro privado no se modifica.</p>
       ${filas.map(([k, v]) => `<div class="dir-row"><strong style="min-width:130px;color:var(--tp)">${k}</strong><span>${esc(v)}</span></div>`).join('')}
     </div>`,
     [
@@ -162,9 +159,6 @@ function proposeDoctorConfirm(d, centerMap) {
             especialidad: d.especialidad || '',
             tarjetaProfesional: d.tarjetaProfesional || '',
             centro: centroTexto,
-            consultorio: d.consultorio || '',
-            tel: d.tel || '',
-            notas: d.notas || '',
             origenPrivadoId: d.id,
           }, state.user.id);
           closeModal();

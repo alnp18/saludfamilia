@@ -162,7 +162,7 @@ function renderDoctorsTab(el, pubDocs, myDocs) {
           <div style="flex:1;min-width:0">
             <div class="doc-name">${esc(d.nombre)}</div>
             ${d.tarjetaProfesional ? `<div class="doc-tarjeta">T.P. ${esc(d.tarjetaProfesional)}</div>` : ''}
-            <div class="doc-detail">${[d.centro, d.consultorio, d.tel].filter(Boolean).map(esc).join(' · ')}</div>
+            <div class="doc-detail">${esc(d.centro || '')}</div>
           </div>
           ${copiedIds.has(d.id)
             ? '<span class="dir-mini-tag" title="Ya lo copiaste a tu directorio de Médicos">En tu directorio</span>'
@@ -328,9 +328,9 @@ function renderReviewTab(el, pendDocs, pendCenters, cambios, targetsById) {
   }
 
   const detail = ({ kind, item }) => kind === 'doctor'
-    ? [item.especialidad, item.tarjetaProfesional && 'T.P. ' + item.tarjetaProfesional, item.centro,
-       item.consultorio, item.tel, item.notas].filter(Boolean).map(esc).join(' · ')
-    : [item.dir, item.tel1, item.tel2, item.email, item.web, item.notas].filter(Boolean).map(esc).join(' · ');
+    ? [item.especialidad, item.tarjetaProfesional && 'T.P. ' + item.tarjetaProfesional,
+       item.centro].filter(Boolean).map(esc).join(' · ')
+    : [item.dir, item.tel1, item.tel2, item.email, item.web].filter(Boolean).map(esc).join(' · ');
 
   el.innerHTML = `
     ${rows.length ? `
@@ -669,9 +669,7 @@ function openPublicDoctorModal(d) {
         </div>
         <div class="form-field"><label class="fl">Número de tarjeta profesional</label><input class="fi" id="pdf-tarjeta" type="text" placeholder="Ej: RM-12345" value="${esc(d?.tarjetaProfesional || '')}"/></div>
         <div class="form-field"><label class="fl">Centro médico (texto)</label><input class="fi" id="pdf-centro" type="text" placeholder="Nombre del centro donde atiende" value="${esc(d?.centro || '')}"/></div>
-        <div class="form-field"><label class="fl">Consultorio</label><input class="fi" id="pdf-consul" type="text" placeholder="Ej: Piso 3, Cons. 301" value="${esc(d?.consultorio || '')}"/></div>
-        ${phoneFieldHtml({ id: 'pdf-tel', label: 'Teléfono / Ext.', placeholder: 'Número directo o extensión', value: d?.tel || '' })}
-        <div class="form-field span2"><label class="fl">Notas</label><textarea class="fi" id="pdf-notas" rows="2" placeholder="Horarios, indicaciones…">${esc(d?.notas || '')}</textarea></div>
+        <p class="dir-consent-help span2" style="margin-left:0">El directorio compartido guarda solo datos del profesional. El consultorio, el teléfono directo y las notas son de cada familia y se editan en su propia vista de Médicos.</p>
       </div>
     </div>`,
     [
@@ -686,9 +684,6 @@ function openPublicDoctorModal(d) {
             especialidad: document.getElementById('pdf-esp').value.trim(),
             tarjetaProfesional: document.getElementById('pdf-tarjeta').value.trim(),
             centro: document.getElementById('pdf-centro').value.trim(),
-            consultorio: document.getElementById('pdf-consul').value.trim(),
-            tel: document.getElementById('pdf-tel').value.trim(),
-            notas: document.getElementById('pdf-notas').value.trim(),
           }, state.user.id);
           closeModal();
           showToast(d ? 'Entrada actualizada' : 'Médico publicado en el directorio');
