@@ -21,18 +21,3 @@ export function isOnline() {
   return navigator.onLine !== false;
 }
 
-/**
- * Avisa cuando la conexión aparece o desaparece.
- * @param {(online: boolean) => void} cb
- * @returns {() => void} función para desuscribirse.
- */
-export function onConnectionChange(cb) {
-  const alConectar = () => cb(true);
-  const alDesconectar = () => cb(false);
-  window.addEventListener('online', alConectar);
-  window.addEventListener('offline', alDesconectar);
-  return () => {
-    window.removeEventListener('online', alConectar);
-    window.removeEventListener('offline', alDesconectar);
-  };
-}

@@ -160,11 +160,6 @@ export function closeStackedModal() {
   top.onClose?.();
 }
 
-/** ¿Hay algún modal apilado abierto? */
-export function hayModalApilado() {
-  return modalStack.length > 0;
-}
-
 export function setModalMaxWidth(px) {
   document.getElementById('modal').style.maxWidth = px;
 }

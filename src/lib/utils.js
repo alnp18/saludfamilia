@@ -58,17 +58,6 @@ export function calcAgeDecimal(dob) {
   return (n - d) / (365.25 * 24 * 3600 * 1000);
 }
 
-/** Lee un File como data-URL (base64) — usado para previsualizar/adjuntar
- * archivos en memoria antes de subirlos a Storage. */
-export function readFileAsDataURL(file) {
-  return new Promise((res, rej) => {
-    const r = new FileReader();
-    r.onload = () => res(r.result);
-    r.onerror = rej;
-    r.readAsDataURL(file);
-  });
-}
-
 /**
  * Nombre completo del contacto de emergencia a partir de su estructura
  * (columna jsonb `contacto_emergencia`, ver migración 0009). Vive acá

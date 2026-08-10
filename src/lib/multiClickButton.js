@@ -80,14 +80,6 @@ function pintarEstado(btn, estado) {
   if (simbolo) simbolo.textContent = cfg.simbolo;
 }
 
-/** Carga un estado ya guardado (por ejemplo, al reabrir un panel de
- *  revisión con decisiones tomadas en una sesión anterior). */
-export function fillMultiClickButton(id, estado) {
-  const btn = document.getElementById(id);
-  if (!btn) return;
-  pintarEstado(btn, ESTADOS.includes(estado) ? estado : 'neutral');
-}
-
 /** Estado actual: 'neutral' | 'aceptado' | 'rechazado'. */
 export function readMultiClickButtonState(id) {
   return document.getElementById(id)?.dataset.estado || 'neutral';
