@@ -51,6 +51,15 @@ let orderPages = { orden: [], documento: [], solicitud: [], autorizacion: [] };
 // Proporción de una hoja carta vertical. El recortador necesita un marco fijo;
 // el de una hoja es el que sirve para encuadrar el papel y dejar fuera la mesa.
 const HOJA_ASPECT = 8.5 / 11;
+// Cómo se llama el PDF que se arma con fotos, por slot. El slot 'orden' guarda
+// la historia clínica y 'documento' la orden — ver migración 0033; sin este
+// mapa el archivo salía llamándose "documento-1-hoja.pdf".
+const NOMBRE_ARCHIVO = {
+  orden: 'historia-clinica',
+  documento: 'orden',
+  solicitud: 'solicitud',
+  autorizacion: 'autorizacion',
+};
 let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
 // -1 = orden nueva (sin restricción de navegación); si no, índice de la
@@ -581,7 +590,7 @@ async function handleFileInput(inputEl, slot, { anexar = false } = {}) {
     const pdf = await files.imagesToPdfDataUrl(paginas);
     orderPages[slot] = paginas;
     orderFiles[slot] = {
-      name: `${slot === 'orden' ? 'historia-clinica' : slot}-${paginas.length}-hoja${paginas.length !== 1 ? 's' : ''}.pdf`,
+      name: `${NOMBRE_ARCHIVO[slot] || slot}-${paginas.length}-hoja${paginas.length !== 1 ? 's' : ''}.pdf`,
       type: 'application/pdf',
       data: pdf,
     };

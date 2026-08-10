@@ -314,11 +314,16 @@ function openTimelineModal(grupo) {
   const o = grupo.orden;
   const conDoc = Object.fromEntries(grupo.docs.map(d => [d.slot, d]));
 
+  // La etapa A puede tener DOS documentos (historia clínica y orden), así que
+  // cada hito lista los suyos en vez de asumir uno solo.
   const hitos = [
-    { etiqueta: 'Orden médica', fecha: o.fechaOrden, slot: 'orden_archivo', nota: 'Historia clínica' },
-    { etiqueta: 'Solicitud', fecha: o.solicitud_fecha, slot: 'solicitud_imagen', nota: o.solicitud_numero ? 'N.º ' + o.solicitud_numero : '' },
-    { etiqueta: 'Autorización', fecha: o.auth_fechaInicio, slot: 'auth_imagen', nota: o.auth_numero ? 'N.º ' + o.auth_numero : '' },
-    { etiqueta: 'Cita', fecha: o.cita_fecha, slot: null, nota: o.cita_hora ? o.cita_hora.slice(0, 5) : '' },
+    { etiqueta: 'Orden médica', fecha: o.fechaOrden, nota: '',
+      slots: [['orden_archivo', 'Historia clínica'], ['orden_documento', 'Orden']] },
+    { etiqueta: 'Solicitud', fecha: o.solicitud_fecha, nota: o.solicitud_numero ? 'N.º ' + o.solicitud_numero : '',
+      slots: [['solicitud_imagen', 'Documento']] },
+    { etiqueta: 'Autorización', fecha: o.auth_fechaInicio, nota: o.auth_numero ? 'N.º ' + o.auth_numero : '',
+      slots: [['auth_imagen', 'Documento']] },
+    { etiqueta: 'Cita', fecha: o.cita_fecha, nota: o.cita_hora ? o.cita_hora.slice(0, 5) : '', slots: [] },
   ];
 
   showModal(
@@ -329,14 +334,18 @@ function openTimelineModal(grupo) {
       </p>
       <div class="hist-timeline">
         ${hitos.map(h => {
-          const doc = h.slot ? conDoc[h.slot] : null;
+          const presentes = h.slots.filter(([slot]) => conDoc[slot]);
           return `<div class="hist-item${h.fecha ? ' current' : ''}">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
               <strong style="color:var(--tp)">${esc(h.etiqueta)}</strong>
               <span style="color:var(--ts)">${h.fecha ? fmtDate(h.fecha) : 'sin registrar'}</span>
               ${h.nota ? `<span style="color:var(--tm)">${esc(h.nota)}</span>` : ''}
-              ${doc ? `<button type="button" class="btn btn-sm" data-tl-abrir="${esc(h.slot)}" style="margin-left:auto">Abrir documento</button>`
-                    : (h.slot ? '<span style="color:var(--tm);margin-left:auto">sin documento</span>' : '')}
+              <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+                ${presentes.length
+                  ? presentes.map(([slot, etiqueta]) =>
+                      `<button type="button" class="btn btn-sm" data-tl-abrir="${esc(slot)}">${esc(etiqueta)}</button>`).join('')
+                  : (h.slots.length ? '<span style="color:var(--tm)">sin documento</span>' : '')}
+              </span>
             </div>
           </div>`;
         }).join('')}
