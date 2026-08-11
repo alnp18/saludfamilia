@@ -34,12 +34,11 @@ let activeDoctor = 'all'; // médico tratante (MI AUDITORIA Órdenes #2)
 let activeTipo = 'all'; // tipo de orden (MI AUDITORIA Órdenes #2)
 let dateFrom = ''; // fecha de la orden, rango "desde" (MI AUDITORIA Órdenes #2)
 let dateTo = ''; // fecha de la orden, rango "hasta"
-// MI AUDITORIA Órdenes #5: pestaña "Flujo" — línea de tiempo minimalista
-// que agrupa en un solo bloque las órdenes del mismo día + mismo médico
-// (mismo médico implica misma especialidad). 'lista' es la vista clásica
-// de tarjetas con filtros; 'flujo' es la nueva línea de tiempo.
-let ordersViewMode = 'lista';
-let expandedFlowGroups = new Set(); // claves de grupo abiertas (persiste entre renders)
+// Dos maneras de mirar lo mismo. 'consultas' (la que abre) muestra una tarjeta
+// por consulta con sus órdenes adentro: es como se registra y como se piensa.
+// 'ordenes' es la lista plana de siempre, con todos los filtros, para cuando
+// hay que encontrar UNA orden concreta entre muchas.
+let ordersViewMode = 'consultas';
 // Campos de adjunto de esta orden. La historia clínica ya no está acá: subió a
 // la consulta (migración 0035). Cada campo guarda su propio estado — ver
 // src/lib/attachmentField.js, que es adonde se mudó toda la lógica de cámara,
@@ -84,8 +83,8 @@ export async function render() {
       <button class="btn btn-primary" id="btn-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nueva consulta</button>
     </div>
     <div class="filter-pills" id="orders-view-tabs" style="margin-bottom:12px">
-      <div class="filter-pill ${ordersViewMode === 'lista' ? 'active' : ''}" data-view-mode="lista">Lista</div>
-      <div class="filter-pill ${ordersViewMode === 'flujo' ? 'active' : ''}" data-view-mode="flujo">Flujo</div>
+      <div class="filter-pill ${ordersViewMode === 'consultas' ? 'active' : ''}" data-view-mode="consultas">Consultas</div>
+      <div class="filter-pill ${ordersViewMode === 'ordenes' ? 'active' : ''}" data-view-mode="ordenes">Órdenes</div>
     </div>
     <div class="orders-filters-row" id="orders-filters-row">
       <div class="filter-pills" id="orders-filters"></div>
@@ -100,7 +99,7 @@ export async function render() {
       </div>
     </div>
     <div id="orders-list" style="display:flex;flex-direction:column;gap:12px"></div>
-    <div id="orders-flow"></div>
+    <div id="orders-consultas" style="display:flex;flex-direction:column;gap:12px"></div>
   `;
   document.getElementById('btn-new-order').addEventListener('click', () => nuevaConsulta());
   document.getElementById('orders-view-tabs').querySelectorAll('[data-view-mode]').forEach(el =>
@@ -108,7 +107,7 @@ export async function render() {
 
   const sub = document.getElementById('orders-sub');
   const list = document.getElementById('orders-list');
-  const flow = document.getElementById('orders-flow');
+  const consultasEl = document.getElementById('orders-consultas');
   const filtersRow = document.getElementById('orders-filters-row');
   const filtersEl = document.getElementById('orders-filters');
   const espSelect = document.getElementById('orders-filter-especialidad');
@@ -118,34 +117,36 @@ export async function render() {
   const hastaInput = document.getElementById('orders-filter-hasta');
 
   if (!state.activePatient) {
-    sub.textContent = 'Selecciona un paciente para ver sus órdenes';
+    sub.textContent = 'Selecciona un paciente para ver sus consultas';
     filtersEl.innerHTML = '';
     espSelect.innerHTML = '';
     docSelect.innerHTML = '';
     tipoSelect.innerHTML = '';
     list.innerHTML = emptyStateHtml({ icon: Icons.users, title: 'Selecciona un paciente' });
-    flow.innerHTML = '';
+    consultasEl.innerHTML = '';
     document.getElementById('sb-badge-orders').style.display = 'none';
     return;
   }
-  sub.textContent = `Órdenes de ${state.activePatient.nombre}`;
+  sub.textContent = `Consultas y órdenes de ${state.activePatient.nombre}`;
 
-  // La pestaña Flujo tiene su propia vista agrupada (MI AUDITORIA Órdenes
-  // #5) y no usa los filtros de etapa/especialidad/médico/tipo de la Lista.
-  filtersRow.style.display = ordersViewMode === 'flujo' ? 'none' : '';
-  list.style.display = ordersViewMode === 'flujo' ? 'none' : '';
-  flow.style.display = ordersViewMode === 'flujo' ? '' : 'none';
+  // La vista por consultas no usa los filtros de etapa/especialidad/médico/tipo:
+  // son filtros de orden y ahí las órdenes van agrupadas.
+  const porConsultas = ordersViewMode === 'consultas';
+  filtersRow.style.display = porConsultas ? 'none' : '';
+  list.style.display = porConsultas ? 'none' : '';
+  consultasEl.style.display = porConsultas ? '' : 'none';
 
-  let orders, doctors;
+  let orders, doctors, visits;
   try {
-    [orders, doctors] = await Promise.all([
+    [orders, doctors, visits] = await Promise.all([
       api.listOrdersByPatient(state.activePatient.id),
       api.listDoctors(state.household.id),
+      api.listVisitsByPatient(state.activePatient.id),
     ]);
   } catch (err) {
-    showToast(err.message || 'No se pudieron cargar las órdenes', 'err');
+    showToast(err.message || 'No se pudieron cargar las consultas', 'err');
     const errHtml = errorStateHtml({ retryId: 'btn-retry-orders' });
-    if (ordersViewMode === 'flujo') flow.innerHTML = errHtml; else list.innerHTML = errHtml;
+    if (porConsultas) consultasEl.innerHTML = errHtml; else list.innerHTML = errHtml;
     document.getElementById('btn-retry-orders').addEventListener('click', () => render());
     return;
   }
@@ -155,8 +156,8 @@ export async function render() {
   const badge = document.getElementById('sb-badge-orders');
   if (pendingCount) { badge.style.display = 'flex'; badge.textContent = pendingCount; } else { badge.style.display = 'none'; }
 
-  if (ordersViewMode === 'flujo') {
-    renderFlowView(orders, docMap, flow);
+  if (porConsultas) {
+    renderConsultasView(visits, orders, docMap, consultasEl);
     if (pendingOptions?.openWizard) { pendingOptions = null; nuevaConsulta(); }
     else if (pendingOptions?.openOrderId) { const id = pendingOptions.openOrderId; pendingOptions = null; openOrderModal(id); }
     return;
@@ -293,76 +294,104 @@ function renderOrderCard(o, docMap) {
 }
 
 // ─────────────────────────────────────────
-// Pestaña "Flujo" (MI AUDITORIA Órdenes #5) — línea de tiempo minimalista.
-// Un bloque por CONSULTA: en colapsado, especialidad + fecha; al hacer click,
-// el médico y todo lo que se ordenó ese día.
+// Vista por consultas (sucede a la pestaña "Flujo" de MI AUDITORIA Órdenes #5).
 //
-// Hasta la migración 0035 el agrupamiento se calculaba acá, por fecha + médico:
-// era una aproximación, y fundía en un solo bloque dos consultas del mismo
-// médico el mismo día. Ahora la consulta existe en la base y el agrupamiento es
-// exacto — de hecho fue esta pantalla la que mostró que la consulta hacía falta.
+// Flujo agrupaba adivinando por fecha + médico, porque la consulta no existía
+// en la base. Fue esa pantalla la que mostró que hacía falta. Ahora existe
+// (migración 0035) y el agrupamiento es exacto: se lee, no se calcula.
 // ─────────────────────────────────────────
-function flowGroupKey(o) { return o.visitId || `sin-consulta-${o.id}`; }
 
-function renderFlowView(orders, docMap, container) {
-  if (!orders.length) {
+/**
+ * Vista de CONSULTAS: una tarjeta por consulta, con sus órdenes adentro.
+ *
+ * Reemplaza a la antigua pestaña "Flujo", que agrupaba adivinando por fecha +
+ * médico. Y arregla un agujero que abrió la tanda 12: al mover el registro a la
+ * consulta pero dejar la lista mostrando ÓRDENES, una consulta sin órdenes
+ * quedaba invisible — se guardaba, avisaba "guardada", y no aparecía en ningún
+ * lado. Una consulta sin órdenes es legítima (fuiste, te revisaron, no
+ * ordenaron nada) y tiene que verse.
+ */
+function renderConsultasView(visits, orders, docMap, container) {
+  if (!visits.length) {
     container.innerHTML = emptyStateHtml({
       icon: Icons.clipboard,
-      title: 'Sin órdenes registradas',
-      message: `Registra la primera orden médica de ${esc(state.activePatient.nombre)}.`,
+      title: 'Sin consultas registradas',
+      message: `Registra la primera consulta de ${esc(state.activePatient.nombre)}.`,
       action: { id: 'btn-new-order-empty-flow', label: 'Nueva consulta' },
     });
     document.getElementById('btn-new-order-empty-flow')?.addEventListener('click', () => nuevaConsulta());
     return;
   }
 
-  const groups = new Map();
+  const porConsulta = new Map();
   orders.forEach(o => {
-    const key = flowGroupKey(o);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(o);
+    if (!porConsulta.has(o.visitId)) porConsulta.set(o.visitId, []);
+    porConsulta.get(o.visitId).push(o);
   });
-  const groupList = [...groups.entries()]
-    .map(([key, items]) => ({ key, items, fecha: items[0].fechaOrden || '' }))
-    .sort((a, b) => (b.fecha || '').localeCompare(a.fecha || ''));
 
-  container.innerHTML = `<div class="flow-timeline">${groupList.map(g => {
-    const doc = docMap[g.items[0].medicoId];
-    const especialidad = doc?.especialidad || 'Sin especialidad';
-    const expanded = expandedFlowGroups.has(g.key);
-    return `<div class="flow-group ${expanded ? 'expanded' : ''}">
-      <div class="flow-dot"></div>
-      <div class="flow-body">
-        <div class="flow-head" data-flow-toggle="${g.key}">
-          <div class="flow-head-main">
-            <span class="flow-esp">${esc(especialidad)}</span>
-            <span class="flow-date">${fmtDate(g.fecha)}</span>
+  container.innerHTML = visits.map(v => {
+    const suyas = porConsulta.get(v.id) || [];
+    const doc = docMap[v.medicoId];
+    const pendientes = suyas.filter(o => o._stage !== 'Finalizado').length;
+
+    const resumen = !suyas.length
+      ? '<span class="tag">Sin órdenes</span>'
+      : pendientes
+        ? `<span class="tag tag-amber">${pendientes} pendiente${pendientes === 1 ? '' : 's'}</span>`
+        : '<span class="tag tag-green">Todo finalizado</span>';
+
+    const filas = suyas.length
+      ? suyas.map(o => `<div class="cs-orden" data-open-order="${o.id}">
+          <div class="cs-orden-txt">
+            <span class="cs-orden-tipo">${esc(o.tipoOrden || 'Orden médica')}</span>
+            <span class="cs-orden-desc">${esc(o.descripcion || 'Sin descripción')}</span>
           </div>
-          <div class="flow-head-side">
-            <span class="flow-count">${g.items.length} ${g.items.length === 1 ? 'orden' : 'órdenes'}</span>
-            <svg class="flow-chevron" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 9l6 6 6-6"/></svg>
-          </div>
+          <span class="tag ${o._stage === 'Finalizado' ? 'tag-green' : 'tag-amber'}">${esc((isAuthTableType(o.tipoOrden) ? STAGE_LABELS_AUTH : STAGE_LABELS)[o._stage] || o._stage)}</span>
+        </div>`).join('')
+      : `<p class="cs-vacia">Esta consulta no tiene órdenes. Puedes agregarle una, o eliminarla si la registraste por error.</p>`;
+
+    return `<div class="cs-card">
+      <div class="cs-head">
+        <div class="cs-head-txt">
+          <div class="cs-fecha">${esc(fmtDate(v.fecha))}</div>
+          <div class="cs-medico">${doc ? esc(doc.nombre) + (doc.especialidad ? ' — ' + esc(doc.especialidad) : '') : 'Médico no asignado'}</div>
         </div>
-        <div class="flow-detail">
-          <div class="flow-detail-doc">${doc ? esc(doc.nombre) : 'Médico no asignado'}</div>
-          <div class="flow-detail-items">${g.items.map(o => `<div class="flow-detail-item" data-flow-view-order="${o.id}">
-            <span class="flow-item-tipo">${esc(o.tipoOrden || 'Orden médica')}</span>
-            <span class="flow-item-desc">${esc(o.descripcion || 'Sin descripción')}</span>
-            <span class="tag ${o._stage === 'Finalizado' ? 'tag-green' : 'tag-amber'}">${esc((isAuthTableType(o.tipoOrden) ? STAGE_LABELS_AUTH : STAGE_LABELS)[o._stage] || o._stage)}</span>
-          </div>`).join('')}</div>
-        </div>
+        ${resumen}
+      </div>
+      ${v.hc_archivo ? `<button type="button" class="btn btn-sm btn-ghost cs-hc" data-hc="${v.id}">Ver historia clínica</button>` : ''}
+      <div class="cs-ordenes">${filas}</div>
+      <div class="cs-acciones">
+        <button type="button" class="btn btn-sm" data-edit-visit="${v.id}">Agregar o editar órdenes</button>
+        ${suyas.length ? '' : `<button type="button" class="btn btn-sm btn-ghost" data-del-visit="${v.id}">Eliminar consulta</button>`}
       </div>
     </div>`;
-  }).join('')}</div>`;
+  }).join('');
 
-  container.querySelectorAll('[data-flow-toggle]').forEach(el => el.addEventListener('click', () => {
-    const key = el.dataset.flowToggle;
-    if (expandedFlowGroups.has(key)) expandedFlowGroups.delete(key); else expandedFlowGroups.add(key);
-    renderFlowView(orders, docMap, container);
+  container.querySelectorAll('[data-open-order]').forEach(el =>
+    el.addEventListener('click', () => openOrderModal(el.dataset.openOrder)));
+
+  container.querySelectorAll('[data-hc]').forEach(el => el.addEventListener('click', () => {
+    const v = visits.find(x => x.id === el.dataset.hc);
+    if (v?.hc_archivo) openAttachmentViewer(v.hc_archivo);
   }));
-  container.querySelectorAll('[data-flow-view-order]').forEach(el => el.addEventListener('click', (e) => {
-    e.stopPropagation();
-    openOrderModal(el.dataset.flowViewOrder);
+
+  container.querySelectorAll('[data-edit-visit]').forEach(el =>
+    el.addEventListener('click', () => nuevaConsulta(el.dataset.editVisit)));
+
+  // Solo se ofrece en consultas sin órdenes, así que no puede arrastrar un
+  // seguimiento ya empezado. Las que sí tienen órdenes se vacían primero desde
+  // el asistente, que respeta la regla de no borrar una orden ya tramitada.
+  container.querySelectorAll('[data-del-visit]').forEach(el => el.addEventListener('click', async () => {
+    if (!confirm('¿Eliminar esta consulta? No tiene órdenes, así que no se pierde ningún seguimiento.')) return;
+    try {
+      const v = visits.find(x => x.id === el.dataset.delVisit);
+      await api.deleteVisit(el.dataset.delVisit);
+      if (v) files.removeAttachments(files.attachmentPathsOfVisit(v));
+      showToast('Consulta eliminada', 'warn');
+      render();
+    } catch (err) {
+      showToast(err.message || 'No se pudo eliminar la consulta', 'err');
+    }
   }));
 }
 

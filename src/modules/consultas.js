@@ -39,6 +39,11 @@ let campoHc = null;
 let uidSeq = 0;
 /** Ruta de la historia clínica al abrir, para borrarla si se reemplaza. */
 let hcOriginalPath = null;
+/** Candado del botón Guardar. En la primera prueba real quedaron dos consultas
+ *  idénticas creadas con dos segundos de diferencia: guardar tarda (sube la
+ *  historia clínica y crea las órdenes una por una) y en un teléfono es fácil
+ *  volver a pulsar creyendo que no registró el toque. */
+let guardando = false;
 
 /**
  * Abre el asistente. Sin `visitId` es una consulta nueva.
@@ -52,6 +57,7 @@ export async function openConsultaWizard(visitId, { onSaved, filaNueva } = {}) {
   filasBorradas = [];
   uidSeq = 0;
   hcOriginalPath = null;
+  guardando = false;
   campoHc = createAttachmentField({
     id: 'oc-hc',
     nombreArchivo: 'historia-clinica',
@@ -229,6 +235,7 @@ function pintarFilas() {
 }
 
 async function guardar(visitId, onSaved) {
+  if (guardando) return;
   leerFilas();
 
   const fecha = document.getElementById('oc-fecha').value;
@@ -255,8 +262,19 @@ async function guardar(visitId, onSaved) {
     return;
   }
 
+  // Una consulta sin órdenes es legítima —fuiste, te revisaron, no ordenaron
+  // nada— y se guarda igual. Pero conviene decirlo: si el usuario creía haber
+  // cargado una orden, este es el momento de enterarse, no tres días después.
+  if (!utiles.length && !confirm('Esta consulta no tiene ninguna orden.\n\n¿Guardarla así? Podrás agregarle órdenes después.')) {
+    irAPestana('b');
+    return;
+  }
+
   const hh = state.household.id;
   const pat = state.activePatient.id;
+  const btnGuardar = document.querySelector('#modal-footer .btn-primary');
+  guardando = true;
+  if (btnGuardar) { btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando…'; }
 
   try {
     // ── 1. La consulta ──────────────────────────────────────────────
@@ -327,6 +345,12 @@ async function guardar(visitId, onSaved) {
     onSaved?.(visita);
   } catch (err) {
     showToast(err.message || 'Error al guardar la consulta', 'err');
+  } finally {
+    guardando = false;
+    if (btnGuardar) {
+      btnGuardar.disabled = false;
+      btnGuardar.textContent = visitId ? 'Guardar cambios' : 'Guardar consulta';
+    }
   }
 }
 
