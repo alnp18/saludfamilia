@@ -128,10 +128,17 @@ export async function buildExportPayload(householdId, householdName, selectedPat
       api.listVitalsByPatient(p.id),
     ]);
     for (const o of po) {
+      // `orden_archivo` (la historia clínica) es de la CONSULTA desde la
+      // migración 0035, pero en el archivo exportado sigue viajando dentro de
+      // cada orden: así un .sfam nuevo se puede importar en una instalación
+      // vieja, y el import reagrupa las consultas al entrar (ver importPayload).
+      // El precio es que una consulta con tres órdenes exporta la misma hoja
+      // tres veces; el archivo pesa más, pero nadie se queda sin poder abrirlo.
       orders.push({
         ...o,
         patientId: p.id,
         orden_archivo: await embedAttachment(o.orden_archivo),
+        orden_documento: await embedAttachment(o.orden_documento),
         solicitud_imagen: await embedAttachment(o.solicitud_imagen),
         auth_imagen: await embedAttachment(o.auth_imagen),
       });
@@ -227,6 +234,10 @@ const DELETE_BY_TYPE = {
   center: api.deleteCenter,
   doctor: api.deleteDoctor,
   patient: api.deletePatient,
+  // La consulta se registra ANTES que sus órdenes, así que el recorrido
+  // inverso del rollback ya borra las órdenes primero. Borrarla igual arrastra
+  // en cascada lo que quedara (migración 0035).
+  visit: api.deleteVisit,
   order: api.deleteOrder,
   med: api.deleteMed,
   vital: api.deleteVital,
@@ -315,20 +326,53 @@ export async function importPayload(payload, householdId, onProgress = () => {})
       patientMap.set(p.id, saved.id);
     }
 
-    onProgress('Importando órdenes médicas…');
+    onProgress('Importando consultas y órdenes médicas…');
     // Los adjuntos vienen embebidos en el archivo (base64); acá se suben al
     // Storage del household destino. Vale también para archivos exportados
     // antes de la migración a Storage: importan igual y quedan en el bucket.
-    const SLOT_BY_FIELD = { orden_archivo: 'orden', solicitud_imagen: 'solicitud', auth_imagen: 'autorizacion' };
+    //
+    // Desde la migración 0035 una orden no existe suelta: cuelga de una
+    // consulta. Un archivo exportado ANTES de esa migración no trae consultas,
+    // así que se reconstruyen acá agrupando por paciente + fecha + médico, que
+    // es el mismo criterio con el que la pestaña Flujo ya las mostraba juntas.
+    // Es una reconstrucción, no un dato: dos consultas del mismo médico el
+    // mismo día quedan fundidas en una. Alternativa era una consulta por orden,
+    // que rompe justo el caso que la 0035 vino a resolver.
+    const SLOT_BY_FIELD = { orden_documento: 'documento', solicitud_imagen: 'solicitud', auth_imagen: 'autorizacion' };
+    const visitasCreadas = new Map(); // clave paciente|fecha|médico → id de la consulta
     for (const o of payload.orders || []) {
       const patientId = patientMap.get(o.patientId);
       if (!patientId) continue; // orden de un paciente no incluido: no debería pasar
+      const medicoId = o.medicoId ? doctorMap.get(o.medicoId) || null : null;
+
+      const claveVisita = `${patientId}|${o.fechaOrden || ''}|${medicoId || ''}`;
+      let visitId = visitasCreadas.get(claveVisita);
+      if (!visitId) {
+        let visita = await api.saveVisit(
+          { medicoId, fecha: o.fechaOrden || null, hc_archivo: null },
+          householdId, patientId,
+        );
+        track('visit', visita.id);
+        // La historia clínica es de la consulta: se sube una vez, con la
+        // primera orden del grupo, y las demás la comparten.
+        if (o.orden_archivo?.data) {
+          const subida = await files.uploadAttachment(householdId, visita.id, 'hc', o.orden_archivo);
+          if (subida?.path) uploadedPaths.push(subida.path);
+          visita = await api.saveVisit(
+            { id: visita.id, medicoId, fecha: o.fechaOrden || null, hc_archivo: subida },
+            householdId, patientId,
+          );
+        }
+        visitId = visita.id;
+        visitasCreadas.set(claveVisita, visitId);
+      }
+
       const base = {
         ...o, id: undefined,
-        medicoId: o.medicoId ? doctorMap.get(o.medicoId) || null : null,
+        visitId,
         medicoId_cita: o.medicoId_cita ? doctorMap.get(o.medicoId_cita) || null : null,
         auth_centroId: o.auth_centroId ? centerMap.get(o.auth_centroId) || null : null,
-        orden_archivo: null, solicitud_imagen: null, auth_imagen: null,
+        orden_documento: null, solicitud_imagen: null, auth_imagen: null,
       };
       const saved = await api.saveOrder(base, householdId, patientId);
       track('order', saved.id);

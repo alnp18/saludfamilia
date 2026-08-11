@@ -742,12 +742,87 @@ export async function deletePublicCenter(id) {
 }
 
 // ─────────────────────────────────────────
+// MEDICAL VISITS — la consulta (migración 0035)
+//
+// Una consulta agrupa las órdenes que salieron de ella y guarda lo que TODAS
+// comparten: fecha, médico tratante e historia clínica. No agrupa el
+// seguimiento — cada orden conserva su solicitud, su autorización y su cita.
+// ─────────────────────────────────────────
+function rowToVisit(r) {
+  return {
+    id: r.id,
+    patientId: r.patient_id,
+    medicoId: r.medico_id,
+    fecha: r.fecha,
+    hc_archivo: r.hc_archivo,
+    // Solo llegan por medical_visits_with_summary; con getVisit vienen sin definir.
+    ordenesTotal: r.ordenes_total,
+    ordenesFinalizadas: r.ordenes_finalizadas,
+    ordenesPendientes: r.ordenes_pendientes,
+  };
+}
+function visitToRow(v, householdId, patientId) {
+  return {
+    household_id: householdId,
+    patient_id: patientId,
+    medico_id: v.medicoId || null,
+    fecha: v.fecha || null,
+    hc_archivo: v.hc_archivo || null,
+  };
+}
+
+export async function listVisitsByPatient(patientId) {
+  const { data, error } = await supabase.from('medical_visits_with_summary').select('*')
+    .eq('patient_id', patientId).order('fecha', { ascending: false });
+  if (error) throw error;
+  return data.map(rowToVisit);
+}
+
+export async function getVisit(id) {
+  const { data, error } = await supabase.from('medical_visits_with_summary').select('*').eq('id', id).single();
+  if (error) throw error;
+  return rowToVisit(data);
+}
+
+export async function saveVisit(visit, householdId, patientId) {
+  const row = visitToRow(visit, householdId, patientId);
+  if (visit.id) {
+    const { error } = await supabase.from('medical_visits').update(row).eq('id', visit.id);
+    if (error) throw error;
+    return getVisit(visit.id);
+  }
+  const { data, error } = await supabase.from('medical_visits').insert(row).select('id').single();
+  if (error) throw error;
+  return getVisit(data.id);
+}
+
+/** Borra la consulta. Sus órdenes se van en cascada (FK de la migración 0035). */
+export async function deleteVisit(id) {
+  const { error } = await supabase.from('medical_visits').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/** Órdenes de una consulta, con su etapa ya calculada. */
+export async function listOrdersByVisit(visitId) {
+  const { data, error } = await supabase.from('medical_orders_with_stage').select('*')
+    .eq('visit_id', visitId).order('created_at');
+  if (error) throw error;
+  return data.map(rowToOrder);
+}
+
+// ─────────────────────────────────────────
 // MEDICAL ORDERS (usa la vista con stage ya calculado)
+//
+// ⚠️ `medicoId`, `fechaOrden` y `orden_archivo` se LEEN desde acá pero
+// pertenecen a la consulta: la vista los trae de medical_visits (0035). Para
+// cambiarlos hay que guardar la consulta, no la orden — orderToRow ni siquiera
+// los mira.
 // ─────────────────────────────────────────
 function rowToOrder(r) {
   return {
     id: r.id,
     patientId: r.patient_id,
+    visitId: r.visit_id,
     medicoId: r.medico_id,
     fechaOrden: r.fecha_orden,
     tipoOrden: r.tipo_orden,
@@ -778,11 +853,12 @@ function orderToRow(o, householdId, patientId) {
   return {
     household_id: householdId,
     patient_id: patientId,
-    medico_id: o.medicoId || null,
-    fecha_orden: o.fechaOrden || null,
+    // La orden cuelga de su consulta. medico_id, fecha_orden y orden_archivo
+    // ya NO son columnas de medical_orders (0035): mandarlas haría fallar el
+    // insert con "column does not exist".
+    visit_id: o.visitId,
     tipo_orden: o.tipoOrden || null,
     descripcion: o.descripcion || null,
-    orden_archivo: o.orden_archivo || null,
     orden_documento: o.orden_documento || null,
     solicitud_fecha: o.solicitud_fecha || null,
     solicitud_hora: o.solicitud_hora || null,

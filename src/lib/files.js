@@ -10,7 +10,8 @@ import { showToast } from './modal.js';
  * El formato viejo se sigue LEYENDO (archivos .sfam antiguos, datos
  * previos a la migración 0006) pero ya no se escribe.
  *
- * Ruta de cada objeto: <household_id>/<order_id>/<slot>-<ts>-<nombre>.
+ * Ruta de cada objeto: <household_id>/<owner_id>/<slot>-<ts>-<nombre>, donde
+ * el dueño es la orden o la consulta (ver uploadAttachment).
  * Las políticas de Storage validan el primer segmento con
  * is_household_member(), igual que la RLS de las tablas.
  */
@@ -58,44 +59,19 @@ export function blobToDataUrl(blob) {
 /**
  * Sube un adjunto en memoria ({name, type, data: dataURL}) y devuelve el
  * objeto persistible {name, type, size, path}.
+ *
+ * `ownerId` es el dueño del adjunto y da el segundo segmento de la ruta: la
+ * orden, o —desde la migración 0035— la consulta, que guarda la historia
+ * clínica en su propia carpeta. Las políticas de Storage solo validan el
+ * PRIMER segmento (el household), así que el segundo es libre.
  */
-export async function uploadAttachment(householdId, orderId, slot, att) {
+export async function uploadAttachment(householdId, ownerId, slot, att) {
   const blob = dataUrlToBlob(att.data);
-  const path = `${householdId}/${orderId}/${slot}-${Date.now()}-${sanitizeName(att.name)}`;
+  const path = `${householdId}/${ownerId}/${slot}-${Date.now()}-${sanitizeName(att.name)}`;
   const { error } = await supabase.storage.from(BUCKET)
     .upload(path, blob, { contentType: att.type || blob.type, upsert: false });
   if (error) throw error;
   return { name: att.name, type: att.type || blob.type, size: blob.size, path };
-}
-
-/**
- * ¿Este adjunto vive en la carpeta de Storage de ESTA orden? Cada objeto se
- * guarda en `<household_id>/<order_id>/…` (ver uploadAttachment), así que la
- * ruta alcanza para saber de qué orden es. Lo usa el asistente de órdenes
- * para reconocer un adjunto heredado de otra orden — ver copyAttachment.
- */
-export function belongsToOrder(att, householdId, orderId) {
-  return isStored(att) && !!orderId && att.path.startsWith(`${householdId}/${orderId}/`);
-}
-
-/**
- * Copia un objeto ya guardado en Storage a la carpeta de otra orden y
- * devuelve el adjunto persistible que apunta a la COPIA.
- *
- * Lo usa "Agregar otra orden de esta consulta": la historia clínica es la
- * misma hoja, pero las dos órdenes NO pueden compartir la ruta.
- * removeAttachments borra por ruta y no lleva cuenta de referencias — quitar
- * el adjunto de una de las órdenes, o borrar la orden entera, dejaría a la
- * otra apuntando a un objeto que ya no existe. Duplicar unos kilobytes sale
- * más barato que perder una historia clínica.
- *
- * La copia la hace el servidor: el archivo no baja al navegador.
- */
-export async function copyAttachment(att, householdId, orderId, slot) {
-  const destino = `${householdId}/${orderId}/${slot}-${Date.now()}-${sanitizeName(att.name)}`;
-  const { error } = await supabase.storage.from(BUCKET).copy(att.path, destino);
-  if (error) throw error;
-  return { name: att.name, type: att.type, size: att.size, path: destino };
 }
 
 /** URL firmada temporal para ver/descargar un adjunto del bucket privado. */
@@ -126,11 +102,25 @@ export async function removeAttachments(paths) {
   } catch { /* huérfano tolerado */ }
 }
 
-/** Rutas de todos los adjuntos en Storage de una orden (para limpieza). */
+/**
+ * Rutas de los adjuntos en Storage que son PROPIOS de una orden, para limpiar
+ * al borrarla o al reemplazarlos.
+ *
+ * ⚠️ `orden_archivo` NO está en la lista, aunque la vista
+ * `medical_orders_with_stage` lo siga exponiendo: desde la migración 0035 es la
+ * historia clínica de la CONSULTA, compartida por todas sus órdenes. Incluirlo
+ * haría que borrar una sola orden dejara sin historia clínica a las demás —
+ * borra por ruta y no lleva cuenta de referencias.
+ */
 export function attachmentPathsOfOrder(order) {
-  return [order?.orden_archivo, order?.orden_documento, order?.solicitud_imagen, order?.auth_imagen]
+  return [order?.orden_documento, order?.solicitud_imagen, order?.auth_imagen]
     .filter(isStored)
     .map(a => a.path);
+}
+
+/** Rutas de los adjuntos de una consulta. Hoy solo la historia clínica. */
+export function attachmentPathsOfVisit(visit) {
+  return [visit?.hc_archivo].filter(isStored).map(a => a.path);
 }
 
 function loadImage(dataUrl) {

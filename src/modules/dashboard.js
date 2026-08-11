@@ -276,7 +276,7 @@ export async function render() {
         </div>` : ''}
         <div class="card">
           <div class="card-hd"><div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg></div><h2>Próximas citas</h2>
-            <button class="btn btn-sm" id="dash-new-order" style="margin-left:auto">+ Nueva orden</button>
+            <button class="btn btn-sm" id="dash-new-order" style="margin-left:auto">+ Nueva consulta</button>
           </div>
           <div style="padding:12px 18px">
             ${!upcoming.length ? `<div class="empty-state" style="padding:24px 0"><p>Sin citas en los próximos 60 días</p></div>` : upcoming.map(o => {
@@ -320,7 +320,7 @@ export async function render() {
         <div class="card">
           <div class="card-hd"><div class="card-icon" style="background:var(--purple-dim);color:var(--purple-lt)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div><h2>Acciones rápidas</h2></div>
           <div style="padding:10px 14px">
-            <div class="quick-action" id="qa-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/><path d="M9 14l2 2 4-4"/></svg> Nueva orden médica</div>
+            <div class="quick-action" id="qa-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/><path d="M9 14l2 2 4-4"/></svg> Nueva consulta médica</div>
             <div class="quick-action" data-goto="orders"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg> Ver todas las órdenes</div>
             <div class="quick-action" id="qa-new-med"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 6.5L6.5 10.5a5 5 0 007.07 7.07l4-4a5 5 0 00-7.07-7.07z"/><line x1="14" y1="10" x2="10" y2="14"/></svg> Agregar medicamento</div>
             <div class="quick-action" id="qa-new-vital"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg> Registrar signos vitales</div>

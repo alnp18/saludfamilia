@@ -2,14 +2,12 @@ import { state } from '../state.js';
 import * as api from '../lib/api.js';
 import * as files from '../lib/files.js';
 import { openAttachmentViewer } from '../lib/viewer.js';
-import { openImageCropper } from '../lib/imageCropper.js';
+import { createAttachmentField } from '../lib/attachmentField.js';
 import { showModal, closeModal, showToast, setModalMaxWidth } from '../lib/modal.js';
 import { openViewOverlay, closeViewOverlay } from '../lib/viewModeOverlay.js';
-import { esc, fmtDate, today, daysFrom } from '../lib/utils.js';
+import { esc, fmtDate, daysFrom } from '../lib/utils.js';
 import { SPECIALTIES } from './doctors.js';
-import { wireInlineNewCenter, wireInlineNewDoctor, copiarMedicoPublico } from '../lib/inlineDirectory.js';
-import { liveSearchFieldHtml, wireLiveSearch, fillLiveSearch, readLiveSearch } from '../lib/liveSearch.js';
-import { buscarMedicos } from '../lib/searches.js';
+import { wireInlineNewCenter, wireInlineNewDoctor } from '../lib/inlineDirectory.js';
 import { INTERVALOS, permisoNotificaciones, activarRecordatorio, desactivarRecordatorio, ETAPAS_RESUELTAS as ETAPAS_SIN_RECORDATORIO } from '../lib/reminders.js';
 import { emptyStateHtml, errorStateHtml } from '../lib/emptyState.js';
 import { Icons } from '../lib/icons.js';
@@ -42,24 +40,14 @@ let dateTo = ''; // fecha de la orden, rango "hasta"
 // de tarjetas con filtros; 'flujo' es la nueva línea de tiempo.
 let ordersViewMode = 'lista';
 let expandedFlowGroups = new Set(); // claves de grupo abiertas (persiste entre renders)
-let orderFiles = { orden: null, documento: null, solicitud: null, autorizacion: null };
-// Hojas fotografiadas en esta sesión, por slot. Una historia clínica puede
-// tener varias y se guardan como un PDF de varias páginas: es un documento,
-// no tres adjuntos sueltos. Vive aparte de orderFiles porque el PDF hay que
-// rearmarlo entero cada vez que se suma o se quita una hoja.
-let orderPages = { orden: [], documento: [], solicitud: [], autorizacion: [] };
-// Proporción de una hoja carta vertical. El recortador necesita un marco fijo;
-// el de una hoja es el que sirve para encuadrar el papel y dejar fuera la mesa.
-const HOJA_ASPECT = 8.5 / 11;
-// Cómo se llama el PDF que se arma con fotos, por slot. El slot 'orden' guarda
-// la historia clínica y 'documento' la orden — ver migración 0033; sin este
-// mapa el archivo salía llamándose "documento-1-hoja.pdf".
-const NOMBRE_ARCHIVO = {
-  orden: 'historia-clinica',
-  documento: 'orden',
-  solicitud: 'solicitud',
-  autorizacion: 'autorizacion',
-};
+// Campos de adjunto de esta orden. La historia clínica ya no está acá: subió a
+// la consulta (migración 0035). Cada campo guarda su propio estado — ver
+// src/lib/attachmentField.js, que es adonde se mudó toda la lógica de cámara,
+// recorte y armado del PDF que antes vivía suelta en este módulo.
+let campos = { documento: null, solicitud: null, autorizacion: null };
+// Consulta de la orden que se está editando. Se guarda acá porque saveOrder
+// reescribe la fila completa y visit_id es not null: hay que devolvérselo.
+let currentVisitId = null;
 let originalStoredPaths = []; // adjuntos en Storage al abrir el wizard (para limpiar reemplazados)
 let pendingOptions = null; // { openWizard, openOrderId } pasado desde goView
 // -1 = orden nueva (sin restricción de navegación); si no, índice de la
@@ -77,6 +65,12 @@ let authOriginalEntregado = new Set();
 
 export function setPendingOptions(opts) { pendingOptions = opts; }
 
+/** Registrar empieza por la consulta, no por la orden (migración 0035). */
+async function nuevaConsulta(visitId) {
+  const { openConsultaWizard } = await import('./consultas.js');
+  openConsultaWizard(visitId, { onSaved: () => render() });
+}
+
 export async function render() {
   const container = document.getElementById('view-orders');
   if (!container) return;
@@ -85,9 +79,9 @@ export async function render() {
     <div class="view-header">
       <div>
         <div class="view-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/><path d="M9 14l2 2 4-4"/></svg> Órdenes médicas</div>
-        <div class="view-sub" id="orders-sub">Flujo completo Orden → Solicitud → Autorización → Cita</div>
+        <div class="view-sub" id="orders-sub">Consulta → Orden → Solicitud → Autorización → Cita</div>
       </div>
-      <button class="btn btn-primary" id="btn-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nueva orden</button>
+      <button class="btn btn-primary" id="btn-new-order"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Nueva consulta</button>
     </div>
     <div class="filter-pills" id="orders-view-tabs" style="margin-bottom:12px">
       <div class="filter-pill ${ordersViewMode === 'lista' ? 'active' : ''}" data-view-mode="lista">Lista</div>
@@ -108,7 +102,7 @@ export async function render() {
     <div id="orders-list" style="display:flex;flex-direction:column;gap:12px"></div>
     <div id="orders-flow"></div>
   `;
-  document.getElementById('btn-new-order').addEventListener('click', () => openOrderWizard());
+  document.getElementById('btn-new-order').addEventListener('click', () => nuevaConsulta());
   document.getElementById('orders-view-tabs').querySelectorAll('[data-view-mode]').forEach(el =>
     el.addEventListener('click', () => { ordersViewMode = el.dataset.viewMode; render(); }));
 
@@ -163,7 +157,7 @@ export async function render() {
 
   if (ordersViewMode === 'flujo') {
     renderFlowView(orders, docMap, flow);
-    if (pendingOptions?.openWizard) { pendingOptions = null; openOrderWizard(); }
+    if (pendingOptions?.openWizard) { pendingOptions = null; nuevaConsulta(); }
     else if (pendingOptions?.openOrderId) { const id = pendingOptions.openOrderId; pendingOptions = null; openOrderModal(id); }
     return;
   }
@@ -234,7 +228,7 @@ export async function render() {
       message: orders.length ? 'Prueba con otro filtro de etapa o especialidad.' : 'Registra la primera orden médica de ' + esc(state.activePatient.nombre) + '.',
       action: orders.length ? null : { id: 'btn-new-order-empty', label: 'Nueva orden' },
     });
-    document.getElementById('btn-new-order-empty')?.addEventListener('click', () => openOrderWizard());
+    document.getElementById('btn-new-order-empty')?.addEventListener('click', () => nuevaConsulta());
   } else {
     list.innerHTML = filtered.map(o => renderOrderCard(o, docMap)).join('');
     list.querySelectorAll('[data-view-order]').forEach(el => el.addEventListener('click', (e) => {
@@ -248,7 +242,7 @@ export async function render() {
   }
 
   // Manejar navegación entrante desde el dashboard
-  if (pendingOptions?.openWizard) { pendingOptions = null; openOrderWizard(); }
+  if (pendingOptions?.openWizard) { pendingOptions = null; nuevaConsulta(); }
   else if (pendingOptions?.openOrderId) { const id = pendingOptions.openOrderId; pendingOptions = null; openOrderModal(id); }
 }
 
@@ -300,12 +294,15 @@ function renderOrderCard(o, docMap) {
 
 // ─────────────────────────────────────────
 // Pestaña "Flujo" (MI AUDITORIA Órdenes #5) — línea de tiempo minimalista.
-// Agrupa en un solo bloque las órdenes generadas el mismo día para el mismo
-// médico tratante (mismo médico ⇒ misma especialidad), mostrando en
-// colapsado solo especialidad + fecha; al hacer click se expande el
-// detalle del día (médico y qué más se ordenó ese día).
+// Un bloque por CONSULTA: en colapsado, especialidad + fecha; al hacer click,
+// el médico y todo lo que se ordenó ese día.
+//
+// Hasta la migración 0035 el agrupamiento se calculaba acá, por fecha + médico:
+// era una aproximación, y fundía en un solo bloque dos consultas del mismo
+// médico el mismo día. Ahora la consulta existe en la base y el agrupamiento es
+// exacto — de hecho fue esta pantalla la que mostró que la consulta hacía falta.
 // ─────────────────────────────────────────
-function flowGroupKey(o) { return `${o.fechaOrden || 'sin-fecha'}|${o.medicoId || 'sin-medico'}`; }
+function flowGroupKey(o) { return o.visitId || `sin-consulta-${o.id}`; }
 
 function renderFlowView(orders, docMap, container) {
   if (!orders.length) {
@@ -313,9 +310,9 @@ function renderFlowView(orders, docMap, container) {
       icon: Icons.clipboard,
       title: 'Sin órdenes registradas',
       message: `Registra la primera orden médica de ${esc(state.activePatient.nombre)}.`,
-      action: { id: 'btn-new-order-empty-flow', label: 'Nueva orden' },
+      action: { id: 'btn-new-order-empty-flow', label: 'Nueva consulta' },
     });
-    document.getElementById('btn-new-order-empty-flow')?.addEventListener('click', () => openOrderWizard());
+    document.getElementById('btn-new-order-empty-flow')?.addEventListener('click', () => nuevaConsulta());
     return;
   }
 
@@ -455,8 +452,8 @@ function renderOrderReadView(o, docMap, centerMap, authList) {
     ${o.orden_archivo ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="orden">Ver historia clínica</button>` : roField('Historia clínica', null)}
     ${o.orden_documento ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="documento">Ver orden</button>` : roField('Orden', null)}
     <div class="ro-consulta-add">
-      <button type="button" class="btn btn-sm" data-pv-nueva-orden="1">Agregar otra orden de esta consulta</button>
-      <p class="ro-empty-msg">Hereda el médico, la fecha y la historia clínica. La nueva orden lleva su propia solicitud, autorización y cita.</p>
+      <button type="button" class="btn btn-sm" data-pv-consulta="1">Ver la consulta completa</button>
+      <p class="ro-empty-msg">La fecha, el médico y la historia clínica son de la consulta y se editan allá. Desde ahí se le agregan más órdenes.</p>
     </div>
   </div>`;
 
@@ -543,162 +540,15 @@ async function openOrderModal(id) {
   // alcanzada, como hace "Editar").
   root.querySelectorAll('[data-pv-update-stage]').forEach(btn => btn.addEventListener('click', () => {
     closeViewOverlay();
-    openOrderWizard(id, undefined, btn.dataset.pvUpdateStage);
+    openOrderWizard(id, btn.dataset.pvUpdateStage);
   }));
-  // Otra orden de la misma consulta: el asistente se abre en blanco salvo por
-  // lo que comparten (ver prefillDeLaConsulta). No modifica esta orden.
-  root.querySelector('[data-pv-nueva-orden]')?.addEventListener('click', () => {
+  // Ir a la consulta de la que salió esta orden: para agregarle otra, o para
+  // corregir de una vez la fecha, el médico o la historia clínica de todas.
+  root.querySelector('[data-pv-consulta]')?.addEventListener('click', async () => {
+    const { openConsultaWizard } = await import('./consultas.js');
     closeViewOverlay();
-    openOrderWizard(undefined, prefillDeLaConsulta(o));
+    openConsultaWizard(o.visitId, { onSaved: () => render() });
   });
-}
-
-/** Cualquier foto (subida desde archivos o tomada con la cámara) se
- * convierte automáticamente a PDF — cambio transversal P1.5, aplica a las
- * 3 secciones (Historia clínica, Solicitud, Autorización), no solo a la
- * primera. En memoria hasta guardar la orden: recién ahí se sube a Storage. */
-/**
- * Un archivo recién elegido para un slot de adjunto.
- *
- * Un PDF entra tal cual. Una foto pasa primero por el recortador, con marco de
- * hoja carta: la cámara del teléfono captura la mesa, la mano y el papel
- * torcido, y hasta ahora todo eso quedaba guardado como "la historia clínica".
- * Se puede cancelar el recorte, y entonces no se guarda nada — cancelar
- * significa "esta foto no", no "guárdala como salga".
- *
- * Las fotos se acumulan: cada hoja nueva se suma al PDF en vez de reemplazarlo,
- * porque una historia clínica de tres hojas es un documento de tres páginas.
- * Un PDF subido desde archivos sí reemplaza lo que hubiera: no se puede
- * anexarle páginas del lado del navegador sin reescribirlo entero.
- */
-async function handleFileInput(inputEl, slot, { anexar = false } = {}) {
-  const file = inputEl.files[0];
-  inputEl.value = ''; // permite volver a elegir el mismo archivo (subir vs. cámara)
-  if (!file) return;
-
-  if (!file.type.startsWith('image/')) {
-    const processed = await files.processUploadFile(file);
-    if (!processed) return; // ya se avisó (tamaño demasiado grande, etc.)
-    orderPages[slot] = [];
-    orderFiles[slot] = processed;
-    renderFilePreview(slot);
-    return;
-  }
-
-  if (!files.validateImageFile(file)) return;
-  const dataUrl = await files.blobToDataUrl(file);
-  const recortada = await openImageCropper(dataUrl, {
-    shape: 'rect',
-    aspect: HOJA_ASPECT,
-    outputWidth: 1400, // legible: es un documento para leer, no una miniatura
-    title: anexar ? 'Ajustar la hoja siguiente' : 'Ajustar la hoja',
-  });
-  if (!recortada) return; // canceló el recorte
-
-  const paginas = anexar ? [...orderPages[slot], recortada] : [recortada];
-  try {
-    const pdf = await files.imagesToPdfDataUrl(paginas);
-    orderPages[slot] = paginas;
-    orderFiles[slot] = {
-      name: `${NOMBRE_ARCHIVO[slot] || slot}-${paginas.length}-hoja${paginas.length !== 1 ? 's' : ''}.pdf`,
-      type: 'application/pdf',
-      data: pdf,
-    };
-  } catch {
-    showToast('No se pudo armar el PDF con la foto', 'err');
-    return;
-  }
-  renderFilePreview(slot);
-}
-
-function renderFilePreview(slot) {
-  const el = document.getElementById(`fp-${slot}`);
-  const f = orderFiles[slot];
-  if (!el) return;
-  if (!f) { el.innerHTML = ''; return; }
-  const isImg = (f.type || '').startsWith('image/');
-  // "Agregar otra hoja" solo tiene sentido sobre un PDF armado con fotos en
-  // esta sesión: a uno ya guardado en Storage no se le pueden anexar páginas
-  // desde el navegador, y ofrecerlo sería prometer algo que no ocurre.
-  const hojas = orderPages[slot]?.length || 0;
-  el.innerHTML = `<div class="file-preview">
-    ${isImg ? `<img id="fp-img-${slot}" ${f.data ? `src="${f.data}"` : ''} style="width:32px;height:32px;object-fit:cover;border-radius:4px"/>` : `<div class="fp-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg></div>`}
-    <div class="fp-name" data-open-slot="${slot}" title="Ver archivo">${esc(f.name)}${hojas > 1 ? ` · ${hojas} hojas` : ''}</div>
-    <span class="fp-remove" data-remove-slot="${slot}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>
-  </div>
-  ${hojas ? `<button type="button" class="btn btn-sm" data-add-page="${slot}" style="margin-top:6px">${CAMERA_ICON} Agregar otra hoja</button>` : ''}`;
-  // Miniatura de un adjunto ya en Storage: URL firmada (asíncrona).
-  if (isImg && !f.data && files.isStored(f)) {
-    files.getSignedUrl(f.path).then(url => {
-      const img = document.getElementById(`fp-img-${slot}`);
-      if (img) img.src = url;
-    }).catch(() => {});
-  }
-  el.querySelector('[data-open-slot]')?.addEventListener('click', () =>
-    openAttachmentViewer(orderFiles[slot]));
-  el.querySelector('[data-remove-slot]')?.addEventListener('click', () => {
-    orderFiles[slot] = null;
-    orderPages[slot] = [];
-    renderFilePreview(slot);
-  });
-  el.querySelector('[data-add-page]')?.addEventListener('click', () => {
-    const input = document.getElementById(`cam-${slot}`);
-    input.dataset.anexar = '1';
-    input.click();
-  });
-}
-
-const CAMERA_ICON = '<svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h3.5l1.5-2h6l1.5 2H21a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>';
-
-/** HTML de un campo de adjunto: subir archivo o tomar foto con la cámara
- * del dispositivo (accept + capture="environment" — abre la cámara
- * directamente en el navegador móvil). Ambas rutas pasan por
- * handleFileInput, que convierte cualquier foto a PDF automáticamente. */
-function fileFieldHtml(slot, dropText, acceptUpload) {
-  return `
-    <div class="file-drop-row">
-      <div class="file-drop" id="drop-${slot}">${dropText}</div>
-      <button type="button" class="btn btn-sm btn-icon" id="cam-btn-${slot}" title="Tomar foto">${CAMERA_ICON}</button>
-    </div>
-    <input type="file" id="file-${slot}" accept="${acceptUpload}" style="display:none"/>
-    <input type="file" id="cam-${slot}" accept="image/*" capture="environment" style="display:none"/>
-    <div id="fp-${slot}"></div>`;
-}
-
-/** Conecta ambos disparadores (dropzone → subir archivo; botón cámara →
- * tomar foto) de un campo de adjunto con handleFileInput. */
-function wireFileSlot(slot) {
-  document.getElementById(`drop-${slot}`).addEventListener('click', () => document.getElementById(`file-${slot}`).click());
-  document.getElementById(`file-${slot}`).addEventListener('change', function () { handleFileInput(this, slot); });
-  document.getElementById(`cam-btn-${slot}`).addEventListener('click', () => {
-    const input = document.getElementById(`cam-${slot}`);
-    delete input.dataset.anexar;
-    input.click();
-  });
-  document.getElementById(`cam-${slot}`).addEventListener('change', function () {
-    const anexar = this.dataset.anexar === '1';
-    delete this.dataset.anexar;
-    handleFileInput(this, slot, { anexar });
-  });
-}
-
-/**
- * Datos de la CONSULTA que se heredan al agregar otra orden del mismo día:
- * el médico que la emitió, la fecha y la historia clínica. Es todo lo que
- * las órdenes de una misma consulta comparten de verdad.
- *
- * Queda deliberadamente afuera todo lo demás. El tipo, la descripción y el
- * documento de la orden (`orden_documento`) son de cada orden — el papel es
- * otro. Y las etapas B, C y D no se tocan: cada orden tiene su propia
- * solicitud, su propia autorización y su propia cita, y se tramitan por
- * separado. Agrupar la consulta no une los seguimientos.
- */
-function prefillDeLaConsulta(o) {
-  return {
-    medicoId: o.medicoId || '',
-    fechaOrden: o.fechaOrden || '',
-    orden_archivo: o.orden_archivo || null,
-  };
 }
 
 /** Abre el asistente de edición. `id` ausente = orden nueva (sin
@@ -833,89 +683,39 @@ async function wireRecordatorio(orderId) {
 }
 
 /** Cómo se lee un médico en el campo: nombre y, si se sabe, especialidad. */
-function etiquetaMedico(d) {
-  return d?.nombre ? d.nombre + (d.especialidad ? ' — ' + d.especialidad : '') : '';
-}
-
-/**
- * Qué hacer con lo elegido en el buscador de médico tratante — Fase 3.
- *
- * Son tres casos y solo uno es directo, porque la orden guarda el médico por
- * clave foránea contra la tabla privada del household:
- *
- *  · Médico propio  → el id ya sirve, no hay nada que hacer.
- *  · Del directorio → hay que copiarlo primero al directorio de la familia y
- *                     quedarse con el id de ESA copia, no con el público.
- *  · "Otro"         → no existe en ningún lado: se abre el alta manual con el
- *                     nombre ya escrito, y el campo queda sin selección hasta
- *                     que se guarde (si no, la orden apuntaría a un id vacío).
- */
-async function onSeleccionMedicoTratante(sel, altaMedico) {
-  if (!sel) return;
-
-  if (!sel.id) {
-    fillLiveSearch('of-medico', { label: sel.label });
-    // Si el alta ya estaba abierta, solo se le pasa el nombre: reconstruirla
-    // borraría la especialidad y el centro que ya se hubieran elegido.
-    const yaAbierta = document.getElementById(`${'of-medico-newform'}-nombre`);
-    if (yaAbierta) yaAbierta.value = sel.label;
-    else await altaMedico.abrir(sel.label);
-    showToast('Completa los datos del médico para registrarlo', 'warn');
-    return;
-  }
-
-  if (!sel.id.startsWith('pub:')) return;
-
-  try {
-    const { saved, centroVinculado } = await copiarMedicoPublico(sel.item);
-    fillLiveSearch('of-medico', { id: saved.id, label: etiquetaMedico(saved) });
-    // El otro selector de médico (etapa D) es un <select>: se le suma la
-    // opción para que el médico recién copiado también esté disponible ahí.
-    const selCita = document.getElementById('of-cita-medico');
-    if (selCita && !selCita.querySelector(`option[value="${saved.id}"]`)) {
-      const opt = document.createElement('option');
-      opt.value = saved.id;
-      opt.textContent = etiquetaMedico(saved);
-      selCita.appendChild(opt);
-    }
-    showToast(centroVinculado
-      ? 'Médico copiado a tu directorio (centro vinculado por nombre)'
-      : 'Médico copiado a tu directorio');
-  } catch (err) {
-    // Si la copia falla, se limpia la selección: dejar el nombre visible con
-    // un id público guardado haría fallar el guardado de la orden más tarde,
-    // en un punto donde el error ya no se entendería.
-    fillLiveSearch('of-medico', { label: '' });
-    showToast(err.message || 'No se pudo copiar el médico a tu directorio', 'err');
-  }
-}
-
-async function openOrderWizard(id, prefill, forceTab) {
-  orderFiles = { orden: null, documento: null, solicitud: null, autorizacion: null };
-  orderPages = { orden: [], documento: [], solicitud: [], autorizacion: [] };
+async function openOrderWizard(id, forceTab) {
+  campos = {
+    documento: createAttachmentField({ id: 'of-documento', nombreArchivo: 'orden', dropText: 'Haz clic para subir la orden médica (PDF o foto — se convierte a PDF automáticamente)' }),
+    solicitud: createAttachmentField({ id: 'of-solicitud', nombreArchivo: 'solicitud', dropText: 'Haz clic para subir imagen (se convierte a PDF automáticamente)', accept: 'image/*' }),
+    autorizacion: createAttachmentField({ id: 'of-autorizacion', nombreArchivo: 'autorizacion', dropText: 'Haz clic para subir imagen (se convierte a PDF automáticamente)', accept: 'image/*' }),
+  };
   originalStoredPaths = [];
+  currentVisitId = null;
   currentOrderStageIdx = -1;
   authRows = [];
   authOriginalEntregado = new Set();
 
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
+  // Este asistente ya no CREA órdenes: una orden nace dentro de su consulta
+  // (ver consultas.js). Acá solo se edita una que ya existe y se le hace el
+  // seguimiento — solicitud, autorización y cita.
+  if (!id) { showToast('Las órdenes se crean desde la consulta', 'err'); return; }
+
   let doctors, centers, o = null;
   try {
     doctors = await api.listDoctors(state.household.id);
     centers = await api.listCenters(state.household.id);
-    if (id) {
-      o = await api.getOrder(id);
-      if (o.orden_archivo) orderFiles.orden = o.orden_archivo;
-      if (o.orden_documento) orderFiles.documento = o.orden_documento;
-      if (o.solicitud_imagen) orderFiles.solicitud = o.solicitud_imagen;
-      if (o.auth_imagen) orderFiles.autorizacion = o.auth_imagen;
-      originalStoredPaths = files.attachmentPathsOfOrder(o);
-      currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
-      if (isAuthTableType(o.tipoOrden)) {
-        authRows = await api.listOrderAuthorizations(id);
-        authOriginalEntregado = new Set(authRows.filter(r => r.entregado).map(r => r.mesNumero));
-      }
+    o = await api.getOrder(id);
+    currentVisitId = o.visitId;
+    campos.documento.set(o.orden_documento);
+    campos.solicitud.set(o.solicitud_imagen);
+    campos.autorizacion.set(o.auth_imagen);
+    originalStoredPaths = files.attachmentPathsOfOrder(o);
+    currentOrderStageIdx = STAGE_ORDER.indexOf(o._stage);
+    if (isAuthTableType(o.tipoOrden)) {
+      authRows = await api.listOrderAuthorizations(id);
+      authOriginalEntregado = new Set(authRows.filter(r => r.entregado).map(r => r.mesNumero));
     }
   } catch (err) {
     showToast(err.message || 'No se pudo abrir el asistente de la orden', 'err');
@@ -924,14 +724,11 @@ async function openOrderWizard(id, prefill, forceTab) {
   // Este tipo de orden no tiene pestaña D — si la etapa alcanzada fuera
   // "D" o "Finalizado" (dato legado de antes de esta fusión de tipos), se
   // aterriza en "c" en vez de en una pestaña inexistente/oculta.
-  let startTab = o ? TAB_BY_STAGE[o._stage] : 'a';
-  if (o && isAuthTableType(o.tipoOrden) && startTab === 'd') startTab = 'c';
+  let startTab = TAB_BY_STAGE[o._stage];
+  if (isAuthTableType(o.tipoOrden) && startTab === 'd') startTab = 'c';
 
-  // Orden nueva encadenada a una consulta ya registrada (ver prefillDeLaConsulta).
-  // Su aviso en la pestaña A va como un único nodo de texto, sin elementos en
-  // línea (un <em>, por ejemplo): .info-box es flex y cada hijo se convertiría
-  // en una columna aparte.
-  const esDeConsulta = !id && !!(prefill?.fechaOrden || prefill?.orden_archivo);
+  // Médico de la CONSULTA, solo para mostrarlo. Se edita en la consulta.
+  const docConsulta = doctors.find(d => d.id === o.medicoId) || null;
 
   const docOptionsCita = doctors.map(d => `<option value="${d.id}" ${o?.medicoId_cita === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
   const centerOptions = centers.map(c => `<option value="${c.id}" ${o?.auth_centroId === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
@@ -941,27 +738,22 @@ async function openOrderWizard(id, prefill, forceTab) {
       <button class="wiz-tab ${startTab === 'a' ? 'active' : ''}" data-t="a" type="button"><span class="wiz-dot"></span>A · Orden</button>
       <button class="wiz-tab ${startTab === 'b' ? 'active' : ''}" data-t="b" type="button"><span class="wiz-dot"></span>B · Solicitud</button>
       <button class="wiz-tab ${startTab === 'c' ? 'active' : ''}" data-t="c" type="button"><span class="wiz-dot"></span><span id="wiz-tab-c-label">C · Autorización</span></button>
-      <button class="wiz-tab ${startTab === 'd' ? 'active' : ''} ${isAuthTableType(o?.tipoOrden || prefill?.tipoOrden) ? 'hidden' : ''}" id="wiz-tab-d" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
+      <button class="wiz-tab ${startTab === 'd' ? 'active' : ''} ${isAuthTableType(o.tipoOrden) ? 'hidden' : ''}" id="wiz-tab-d" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
     </div>
     <div class="wiz-pane ${startTab === 'a' ? 'visible' : ''}" id="pane-a">
-      ${!o && esDeConsulta ? `<div class="info-box" style="margin-bottom:16px">Otra orden de la misma consulta: ya vienen el médico, la fecha y la historia clínica. Falta el tipo, la descripción y el documento de esta orden.</div>` : ''}
-      ${!o || o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
+      ${o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
+      <div class="consulta-ref" id="of-consulta-ref">
+        <div class="consulta-ref-txt">
+          <span class="consulta-ref-label">De la consulta</span>
+          <span class="consulta-ref-valor">${esc(fmtDate(o.fechaOrden))}${docConsulta ? ' · ' + esc(docConsulta.nombre) : ''}</span>
+        </div>
+        <button type="button" class="btn btn-sm" id="of-editar-consulta">Editar consulta</button>
+      </div>
       <div class="form-row cols-2">
-        ${liveSearchFieldHtml('of-medico', {
-          label: 'Médico tratante',
-          placeholder: 'Busca por nombre o especialidad…',
-          hint: 'Busca entre tus médicos y en el directorio público. Si no está, escríbelo y lo registras.',
-          accion: { id: 'of-medico-add-btn', title: 'Agregar médico al directorio', label: '+' },
-        })}
-        <div class="form-field span2 hidden" id="of-medico-newform"></div>
-        <div class="form-field"><label class="fl">Fecha de la orden</label><input class="fi" id="of-fecha" type="date"/></div>
         <div class="form-field span2"><label class="fl">Tipo de orden</label><select class="fi" id="of-tipo"><option value="">Seleccione tipo de orden</option>${ORDER_TYPES.map(t => `<option ${o?.tipoOrden === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
         <div class="form-field span2"><label class="fl">Descripción</label><textarea class="fi" id="of-desc" rows="2" placeholder="Descripción de la orden…">${esc(o?.descripcion || '')}</textarea></div>
-        <div class="form-field span2"><label class="fl">Historia clínica</label>
-          ${fileFieldHtml('orden', 'Haz clic para subir la historia clínica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
-        </div>
         <div class="form-field span2"><label class="fl">Orden</label>
-          ${fileFieldHtml('documento', 'Haz clic para subir la orden médica (PDF o foto — se convierte a PDF automáticamente)', '.pdf,image/*')}
+          ${campos.documento.html()}
         </div>
       </div>
     </div>
@@ -974,7 +766,7 @@ async function openOrderWizard(id, prefill, forceTab) {
         <div class="form-field"><label class="fl">Hora</label><input class="fi" id="of-sol-hora" type="time"/></div>
         <div class="form-field span2"><label class="fl">Número de solicitud</label><input class="fi" id="of-sol-num" type="text" placeholder="SOL-2025-XXXXX" style="font-family:'JetBrains Mono',monospace"/></div>
         <div class="form-field span2"><label class="fl">Imagen o captura de pantalla</label>
-          ${fileFieldHtml('solicitud', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
+          ${campos.solicitud.html()}
         </div>
       </div>
     </div>
@@ -1000,42 +792,26 @@ async function openOrderWizard(id, prefill, forceTab) {
           <select class="fi" id="of-estado"><option value="">En curso</option><option value="Finalizado">Finalizado (cita ya asistida)</option></select>
         </div>
         <div class="form-field span2 hidden" id="of-followup-field">
-          <label class="cb-row"><input type="checkbox" id="of-followup"/> Crear una nueva orden de seguimiento al guardar</label>
+          <label class="cb-row"><input type="checkbox" id="of-followup"/> Agregar una orden de control a esta consulta al guardar</label>
         </div>
       </div>
     </div>
   `;
 
-  // "Guardar y agregar otra" solo al crear: encadena otra orden de la misma
-  // consulta sin pasar por la lista ni volver a poner médico, fecha e
-  // historia clínica. Editando una orden ya existente no tendría sentido.
-  const botones = [{ label: 'Cancelar', cls: 'btn', action: closeModal }];
-  if (!id) botones.push({ label: 'Guardar y agregar otra', cls: 'btn', action: () => saveOrderForm(id, { agregarOtra: true }) });
-  botones.push({ label: id ? 'Guardar cambios' : 'Crear orden', cls: 'btn btn-primary', action: () => saveOrderForm(id) });
-
-  showModal(id ? 'Editar orden médica' : 'Nueva orden médica', body, botones);
+  showModal('Editar orden médica', body, [
+    { label: 'Cancelar', cls: 'btn', action: closeModal },
+    { label: 'Guardar cambios', cls: 'btn btn-primary', action: () => saveOrderForm(id) },
+  ]);
   setModalMaxWidth('680px');
 
   document.querySelectorAll('.wiz-tab').forEach(t => t.addEventListener('click', () => switchWizTab(t.dataset.t)));
-  wireFileSlot('orden');
-  wireFileSlot('documento');
-  wireFileSlot('solicitud');
+  campos.documento.wire();
+  campos.solicitud.wire();
 
-  // Médico tratante: buscador en vivo sobre los médicos propios y el
-  // directorio público (Fase 3). El alta manual sigue disponible en el "+",
-  // y es también a donde lleva la opción "Otro" del buscador.
-  const altaMedico = wireInlineNewDoctor({
-    otherSelectIds: ['of-cita-medico'],
-    addBtnId: 'of-medico-add-btn',
-    formContainerId: 'of-medico-newform',
-    specialties: SPECIALTIES,
-    onSaved: (saved) => fillLiveSearch('of-medico', { id: saved.id, label: etiquetaMedico(saved) }),
-  });
-  wireLiveSearch('of-medico', {
-    buscar: buscarMedicos,
-    permitirLibre: true,
-    textoLibre: 'Registrar médico nuevo',
-    onSelect: (sel) => onSeleccionMedicoTratante(sel, altaMedico),
+  document.getElementById('of-editar-consulta').addEventListener('click', async () => {
+    const { openConsultaWizard } = await import('./consultas.js');
+    closeModal();
+    openConsultaWizard(o.visitId, { onSaved: () => render() });
   });
 
   wireInlineNewDoctor({ primarySelectId: 'of-cita-medico', otherSelectIds: [], addBtnId: 'of-cita-medico-add-btn', formContainerId: 'of-cita-medico-newform', specialties: SPECIALTIES });
@@ -1047,46 +823,19 @@ async function openOrderWizard(id, prefill, forceTab) {
   ['of-sol-fecha', 'of-sol-num'].forEach(fid =>
     document.getElementById(fid).addEventListener('input', refrescarAvisoSolicitud));
 
-  if (o) {
-    document.getElementById('of-fecha').value = o.fechaOrden || '';
-    document.getElementById('of-sol-fecha').value = o.solicitud_fecha || '';
-    document.getElementById('of-sol-hora').value = o.solicitud_hora || '';
-    document.getElementById('of-sol-num').value = o.solicitud_numero || '';
-    document.getElementById('of-cita-fecha').value = o.cita_fecha || '';
-    document.getElementById('of-cita-hora').value = o.cita_hora || '';
-    document.getElementById('of-cita-medico').value = o.medicoId_cita || '';
-    document.getElementById('of-cita-consul').value = o.cita_consultorio || '';
-    document.getElementById('of-cita-dir').value = o.cita_direccion || '';
-    document.getElementById('of-cita-ind').value = o.cita_indicaciones || '';
-    document.getElementById('of-estado').value = o.estadoCita || '';
-    // Set programático: no dispara 'change', así que el toggle de
-    // #of-followup-field se replica acá a mano (ver listener más arriba).
-    document.getElementById('of-followup-field').classList.toggle('hidden', o.estadoCita !== 'Finalizado');
-    fillLiveSearch('of-medico', {
-      id: o.medicoId || '',
-      label: etiquetaMedico(doctors.find(d => d.id === o.medicoId)),
-    });
-  } else {
-    document.getElementById('of-fecha').value = prefill?.fechaOrden || today();
-    if (prefill?.medicoId) {
-      fillLiveSearch('of-medico', {
-        id: prefill.medicoId,
-        label: etiquetaMedico(doctors.find(d => d.id === prefill.medicoId)),
-      });
-    }
-    if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
-    // Historia clínica heredada de otra orden de la misma consulta. Llega
-    // como adjunto YA en Storage (sin `data`), apuntando a la carpeta de la
-    // orden de origen; al guardar se copia a la carpeta de esta — ver
-    // needsUpload y files.copyAttachment. Se puede quitar con la ✕ de la
-    // vista previa si esta orden no la lleva.
-    if (prefill?.orden_archivo) orderFiles.orden = prefill.orden_archivo;
-  }
-  // 'documento' se quedó fuera de esta línea cuando se agregó el campo Orden
-  // (tanda 9, migración 0033): el adjunto sí se cargaba en orderFiles, pero al
-  // reabrir la orden no se dibujaba, así que parecía que no había ninguno. No
-  // se perdía —se guardaba de vuelta igual—, pero invitaba a subirlo dos veces.
-  renderFilePreview('orden'); renderFilePreview('documento'); renderFilePreview('solicitud');
+  document.getElementById('of-sol-fecha').value = o.solicitud_fecha || '';
+  document.getElementById('of-sol-hora').value = o.solicitud_hora || '';
+  document.getElementById('of-sol-num').value = o.solicitud_numero || '';
+  document.getElementById('of-cita-fecha').value = o.cita_fecha || '';
+  document.getElementById('of-cita-hora').value = o.cita_hora || '';
+  document.getElementById('of-cita-medico').value = o.medicoId_cita || '';
+  document.getElementById('of-cita-consul').value = o.cita_consultorio || '';
+  document.getElementById('of-cita-dir').value = o.cita_direccion || '';
+  document.getElementById('of-cita-ind').value = o.cita_indicaciones || '';
+  document.getElementById('of-estado').value = o.estadoCita || '';
+  // Set programático: no dispara 'change', así que el toggle de
+  // #of-followup-field se replica acá a mano (ver listener más arriba).
+  document.getElementById('of-followup-field').classList.toggle('hidden', o.estadoCita !== 'Finalizado');
   // Los `value =` de arriba no disparan 'input', así que el aviso de la
   // etapa B se evalúa a mano una vez cargados los datos.
   refrescarAvisoSolicitud();
@@ -1095,7 +844,7 @@ async function openOrderWizard(id, prefill, forceTab) {
   // Pane C (Autorización / Autorizaciones) depende del tipo de orden — se
   // arma aparte y se reconstruye si el usuario cambia el tipo en vivo
   // (MI AUDITORIA Órdenes #4).
-  renderPaneC(o?.tipoOrden || prefill?.tipoOrden || '', o, centerOptions);
+  renderPaneC(o.tipoOrden || '', o, centerOptions);
   document.getElementById('of-tipo').addEventListener('change', (e) => {
     const newTipo = e.target.value;
     document.getElementById('wiz-tab-d').classList.toggle('hidden', isAuthTableType(newTipo));
@@ -1135,7 +884,7 @@ function renderPaneC(tipoOrden, o, centerOptions) {
     <div id="of-auth-completo-aviso"></div>
     <div class="form-row cols-2" style="margin-top:14px">
       <div class="form-field span2"><label class="fl">Imagen de la autorización (opcional)</label>
-        ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
+        ${campos.autorizacion.html()}
       </div>
       <div class="form-field span2">
         <label class="cb-row"><input type="checkbox" id="of-auth-finalizado"/> Todas las entregas completadas — marcar esta orden como finalizada</label>
@@ -1154,14 +903,13 @@ function renderPaneC(tipoOrden, o, centerOptions) {
         </div>
       </div>
       <div class="form-field span2"><label class="fl">Imagen de la autorización</label>
-        ${fileFieldHtml('autorizacion', 'Haz clic para subir imagen (se convierte a PDF automáticamente)', 'image/*')}
+        ${campos.autorizacion.html()}
       </div>
     </div>
   `;
 
-  wireFileSlot('autorizacion');
+  campos.autorizacion.wire();
   wireInlineNewCenter('of-auth-centro', 'of-centro-add-btn');
-  renderFilePreview('autorizacion');
 
   if (isAuthTableType(tipoOrden)) {
     const mesesInput = document.getElementById('of-auth-meses');
@@ -1274,63 +1022,48 @@ function switchWizTab(t) {
 // Slot del wizard → campo jsonb de la orden. Ojo: `orden_archivo` guarda la
 // HISTORIA CLÍNICA y `orden_documento` la orden — el nombre de la primera es
 // histórico, era el único adjunto de la etapa (ver migración 0033).
-const FILE_SLOTS = { orden: 'orden_archivo', documento: 'orden_documento', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
+const FILE_SLOTS = { documento: 'orden_documento', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
 
 /**
- * ¿Este adjunto hay que llevarlo a Storage al guardar la orden `orderId`?
- * Dos casos distintos:
- *
- * - Se eligió en el navegador y todavía es un data-URL en memoria → subir.
- * - Se heredó de otra orden con "Agregar otra orden de esta consulta": ya
- *   está en Storage, pero bajo la carpeta de la orden de ORIGEN → copiar.
- *   Dejarlo apuntando ahí sería compartir el objeto entre dos órdenes, y
- *   eso rompe al borrar (ver files.copyAttachment).
- *
- * Con `orderId` sin definir (la orden todavía no existe) cualquier adjunto
- * cuenta como pendiente: es lo que decide si hace falta el guardado en dos
- * pasos, que es de donde sale el id para la ruta.
+ * ¿Este adjunto todavía está en el navegador y hay que subirlo? Lo que ya vive
+ * en Storage llega sin `data` y no se vuelve a tocar.
  */
-function needsUpload(att, orderId) {
-  if (!att) return false;
-  if (!files.isStored(att)) return !!att.data;
-  return !files.belongsToOrder(att, state.household.id, orderId);
+function needsUpload(att) {
+  return !!(att && att.data && !files.isStored(att));
 }
 
 /**
- * Lleva a Storage los adjuntos pendientes (ver needsUpload: los recién
- * elegidos se suben; los heredados de otra orden se copian) y deja en `obj`
- * el formato persistible {name,type,size,path}.
+ * Sube los adjuntos recién elegidos y deja en `obj` el formato persistible
+ * {name,type,size,path}. La orden ya existe siempre —este asistente no crea—,
+ * así que su id está disponible para armar la ruta desde el primer momento.
  */
 async function uploadNewAttachments(obj, orderId) {
   for (const [slot, field] of Object.entries(FILE_SLOTS)) {
-    const f = orderFiles[slot];
-    if (!needsUpload(f, orderId)) continue;
-    obj[field] = files.isStored(f)
-      ? await files.copyAttachment(f, state.household.id, orderId, slot)
-      : await files.uploadAttachment(state.household.id, orderId, slot, f);
+    const f = campos[slot]?.get();
+    if (!needsUpload(f)) continue;
+    obj[field] = await files.uploadAttachment(state.household.id, orderId, slot, f);
   }
 }
 
-async function saveOrderForm(editId, { agregarOtra = false } = {}) {
+async function saveOrderForm(editId) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
   const tipoOrden = document.getElementById('of-tipo').value;
   const authType = isAuthTableType(tipoOrden);
 
   const obj = {
-    id: editId || undefined,
-    // Solo el id: si se escribió un nombre libre sin registrarlo, no hay a
-    // quién apuntar y el campo queda vacío en vez de guardar basura.
-    medicoId: readLiveSearch('of-medico').id,
-    fechaOrden: document.getElementById('of-fecha').value,
+    id: editId,
+    // La consulta de la que cuelga. No se edita acá, pero saveOrder reconstruye
+    // la fila entera y sin esto el UPDATE la dejaría huérfana (visit_id es not
+    // null: en realidad fallaría, que al menos se nota).
+    visitId: currentVisitId,
     tipoOrden,
     descripcion: document.getElementById('of-desc').value.trim(),
-    orden_archivo: orderFiles.orden,
-    orden_documento: orderFiles.documento,
+    orden_documento: campos.documento.get(),
     solicitud_fecha: document.getElementById('of-sol-fecha').value,
     solicitud_hora: document.getElementById('of-sol-hora').value,
     solicitud_numero: document.getElementById('of-sol-num').value.trim(),
-    solicitud_imagen: orderFiles.solicitud,
+    solicitud_imagen: campos.solicitud.get(),
     // Etapa C: "Autorización" (un registro) vs "Autorizaciones" (tabla
     // mes a mes, MI AUDITORIA Órdenes #4) — solo uno de los dos juegos de
     // campos existe en el DOM según el tipo de orden actual.
@@ -1338,7 +1071,7 @@ async function saveOrderForm(editId, { agregarOtra = false } = {}) {
     auth_fechaVence: authType ? '' : readDateRangeField('of-auth-vigencia').fin,
     auth_numero: authType ? '' : document.getElementById('of-auth-num').value.trim(),
     auth_centroId: document.getElementById('of-auth-centro').value,
-    auth_imagen: orderFiles.autorizacion,
+    auth_imagen: campos.autorizacion.get(),
     auth_meses: authType ? (parseInt(document.getElementById('of-auth-meses').value, 10) || null) : null,
     cita_fecha: document.getElementById('of-cita-fecha').value,
     cita_hora: document.getElementById('of-cita-hora').value,
@@ -1357,51 +1090,11 @@ async function saveOrderForm(editId, { agregarOtra = false } = {}) {
   // ofrece crear un nuevo medicamento a partir de la orden.
   const nuevaEntrega = authType && authRows.some(r => r.entregado && !authOriginalEntregado.has(r.mesNumero));
 
-  if (!obj.fechaOrden) { showToast('La fecha de la orden es obligatoria', 'err'); switchWizTab('a'); return; }
   if (!obj.tipoOrden) { showToast('Selecciona el tipo de orden', 'err'); switchWizTab('a'); return; }
 
-  // Un nombre escrito a mano que nunca se registró no tiene id: guardar así
-  // dejaría la orden sin médico mientras el campo muestra un nombre, que es
-  // la peor combinación posible. Con el <select> anterior esto no podía
-  // pasar; con un campo de texto sí, y hay que decirlo en vez de perderlo.
-  const medicoEscrito = readLiveSearch('of-medico').texto;
-  if (medicoEscrito && !obj.medicoId) {
-    showToast('Registra al médico con el botón + o elígelo de la lista', 'err');
-    switchWizTab('a');
-    return;
-  }
-  // Copiar un médico del directorio público toma dos consultas; si se guarda
-  // en ese intervalo, el id todavía es el público y la base lo rechazaría
-  // con un error incomprensible.
-  if (obj.medicoId.startsWith('pub:')) {
-    showToast('Espera un momento: se está copiando el médico a tu directorio', 'warn');
-    switchWizTab('a');
-    return;
-  }
-
   try {
-    let saved;
-    if (editId) {
-      await uploadNewAttachments(obj, editId);
-      saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
-    } else {
-      // Orden nueva: se necesita su id para la ruta en Storage. Se crea
-      // primero (con los adjuntos aún fuera), se suben, y se actualiza.
-      const hasNewFiles = Object.values(orderFiles).some(f => needsUpload(f, undefined));
-      if (hasNewFiles) {
-        // El borrador va sin NINGÚN adjunto: los slots se vacían desde
-        // FILE_SLOTS y no a mano, que era como se había quedado afuera
-        // orden_documento cuando se agregó en la migración 0033.
-        const draft = { ...obj };
-        for (const field of Object.values(FILE_SLOTS)) draft[field] = null;
-        saved = await api.saveOrder(draft, state.household.id, state.activePatient.id);
-        obj.id = saved.id;
-        await uploadNewAttachments(obj, saved.id);
-        saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
-      } else {
-        saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
-      }
-    }
+    await uploadNewAttachments(obj, editId);
+    const saved = await api.saveOrder(obj, state.household.id, state.activePatient.id);
 
     // Limpiar del Storage los adjuntos que quedaron fuera (reemplazados o
     // quitados en esta edición). Mejor esfuerzo, después de guardar.
@@ -1413,7 +1106,7 @@ async function saveOrderForm(editId, { agregarOtra = false } = {}) {
     // dejando de ser "Medicamentos/Insumos/Terapias", se limpian filas viejas.
     if (authType) {
       await api.replaceOrderAuthorizations(saved.id, state.household.id, authRows);
-    } else if (editId) {
+    } else {
       await api.replaceOrderAuthorizations(saved.id, state.household.id, []);
     }
 
@@ -1426,20 +1119,20 @@ async function saveOrderForm(editId, { agregarOtra = false } = {}) {
     }
 
     closeModal();
-    showToast(editId ? 'Orden actualizada' : 'Orden creada correctamente');
+    showToast('Orden actualizada');
     render();
     if (state.currentView === 'dashboard') {
       const { render: renderDashboard } = await import('./dashboard.js');
       renderDashboard();
     }
-    // "Guardar y agregar otra": el usuario pidió explícitamente encadenar
-    // otra orden de la misma consulta, así que gana sobre los dos ofrecimientos
-    // de abajo — está transcribiendo una pila de papeles, no es momento de
-    // interrumpirlo con un confirm().
-    if (agregarOtra) {
-      openOrderWizard(undefined, prefillDeLaConsulta(saved));
-    } else if (wantsFollowUp) {
-      openOrderWizard(undefined, { medicoId: obj.medicoId, tipoOrden: 'Cita de control' });
+    if (wantsFollowUp) {
+      // La cita de control sale de la MISMA consulta que se acaba de atender,
+      // así que la orden nueva se agrega ahí y no en una consulta suelta.
+      const { openConsultaWizard } = await import('./consultas.js');
+      openConsultaWizard(currentVisitId, {
+        filaNueva: { tipoOrden: 'Cita de control' },
+        onSaved: () => render(),
+      });
     } else if (nuevaEntrega) {
       // Se marcó una nueva entrega en una orden de Medicamentos/Insumos/
       // Terapias: ofrecer registrar el medicamento, precargando el nombre

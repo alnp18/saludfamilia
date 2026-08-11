@@ -834,11 +834,33 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .ro-value { flex:1; font-weight:500; }
 .ro-empty { color:var(--tm); font-weight:400; }
 .ro-empty-msg { font-size:12.5px; color:var(--ts); margin:0; }
-/* "Agregar otra orden de esta consulta" — cierra la sección A, separado de
-   los campos por una línea para que no se lea como un dato más de la orden. */
+/* Enlace a la consulta — cierra la sección A, separado de los campos por una
+   línea para que no se lea como un dato más de la orden. */
 .ro-consulta-add { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
 .ro-consulta-add .ro-empty-msg { margin-top:7px; }
 .ro-consulta-add .btn { width:100%; justify-content:center; }
+
+/* ══ CONSULTA ══ */
+/* Cabecera del asistente de orden: de qué consulta viene. Es contexto, no un
+   campo — por eso no usa .form-field ni se puede escribir encima. */
+.consulta-ref { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:space-between;
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--r-sm); padding:10px 14px; margin-bottom:16px; }
+.consulta-ref-txt { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.consulta-ref-label { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--ts); }
+.consulta-ref-valor { font-size:13px; font-weight:600; }
+.consulta-ref .btn { flex-shrink:0; }
+
+/* Cada orden dentro del asistente de consulta. */
+.oc-orden { border:1px solid var(--border); border-radius:var(--r-sm); padding:12px 14px; margin-bottom:10px; background:var(--surface); }
+.oc-orden-hd { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px;
+  padding-bottom:7px; border-bottom:1px solid var(--border); }
+.oc-orden-num { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.7px; color:var(--ts); }
+.oc-orden-quitar { background:none; border:none; color:var(--tm); cursor:pointer; font-size:15px; line-height:1;
+  padding:2px 6px; border-radius:4px; }
+.oc-orden-quitar:hover { color:var(--red-lt, #f87171); background:rgba(248,113,113,.12); }
+/* Una orden ya tramitada no se quita desde acá; se dice por qué en vez de
+   mostrar un botón apagado que no explica nada. */
+.oc-orden-fijo { font-size:10.5px; color:var(--tm); border:1px solid var(--border); border-radius:10px; padding:1px 8px; }
 /* ══ MEDICATIONS ══ */
 .meds-section-label { display:flex; align-items:center; gap:8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--t-primary-lt); margin-bottom:14px; }
 .meds-section-label svg { width:14px; height:14px; }
