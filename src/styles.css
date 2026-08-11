@@ -404,7 +404,10 @@ textarea.fi { resize: vertical; min-height: 70px; line-height: 1.6; }
 }
 .modal-close:hover { background: var(--hover); color: var(--tp); }
 .modal-close svg { width: 14px; height: 14px; }
-.modal-ft { padding: 13px 22px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+/* flex-wrap: el asistente de órdenes tiene tres botones al crear (Cancelar,
+   Guardar y agregar otra, Crear orden) y en un teléfono angosto no caben en
+   una línea. Sin wrap se salían de la tarjeta. */
+.modal-ft { padding: 13px 22px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 /* ══ MODO VISTA (overlay genérico de solo lectura) ══
    MI AUDITORIA #4/Órdenes-3 — src/lib/viewModeOverlay.js. z-index 900:
    por debajo del visor de adjuntos (950, puede abrirse ENCIMA para ver un
@@ -831,6 +834,11 @@ body.light-mode .dpb-chip { background: var(--hover); }
 .ro-value { flex:1; font-weight:500; }
 .ro-empty { color:var(--tm); font-weight:400; }
 .ro-empty-msg { font-size:12.5px; color:var(--ts); margin:0; }
+/* "Agregar otra orden de esta consulta" — cierra la sección A, separado de
+   los campos por una línea para que no se lea como un dato más de la orden. */
+.ro-consulta-add { margin-top:12px; padding-top:12px; border-top:1px solid var(--border); }
+.ro-consulta-add .ro-empty-msg { margin-top:7px; }
+.ro-consulta-add .btn { width:100%; justify-content:center; }
 /* ══ MEDICATIONS ══ */
 .meds-section-label { display:flex; align-items:center; gap:8px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; color:var(--t-primary-lt); margin-bottom:14px; }
 .meds-section-label svg { width:14px; height:14px; }

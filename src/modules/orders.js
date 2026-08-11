@@ -454,6 +454,10 @@ function renderOrderReadView(o, docMap, centerMap, authList) {
     ${roField('Descripción', o.descripcion ? esc(o.descripcion) : null)}
     ${o.orden_archivo ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="orden">Ver historia clínica</button>` : roField('Historia clínica', null)}
     ${o.orden_documento ? `<button type="button" class="btn btn-sm btn-ghost" data-view-file="documento">Ver orden</button>` : roField('Orden', null)}
+    <div class="ro-consulta-add">
+      <button type="button" class="btn btn-sm" data-pv-nueva-orden="1">Agregar otra orden de esta consulta</button>
+      <p class="ro-empty-msg">Hereda el médico, la fecha y la historia clínica. La nueva orden lleva su propia solicitud, autorización y cita.</p>
+    </div>
   </div>`;
 
   const seccionB = stageIdx >= 1 ? `<div class="ro-section">
@@ -541,6 +545,12 @@ async function openOrderModal(id) {
     closeViewOverlay();
     openOrderWizard(id, undefined, btn.dataset.pvUpdateStage);
   }));
+  // Otra orden de la misma consulta: el asistente se abre en blanco salvo por
+  // lo que comparten (ver prefillDeLaConsulta). No modifica esta orden.
+  root.querySelector('[data-pv-nueva-orden]')?.addEventListener('click', () => {
+    closeViewOverlay();
+    openOrderWizard(undefined, prefillDeLaConsulta(o));
+  });
 }
 
 /** Cualquier foto (subida desde archivos o tomada con la cámara) se
@@ -670,6 +680,25 @@ function wireFileSlot(slot) {
     delete this.dataset.anexar;
     handleFileInput(this, slot, { anexar });
   });
+}
+
+/**
+ * Datos de la CONSULTA que se heredan al agregar otra orden del mismo día:
+ * el médico que la emitió, la fecha y la historia clínica. Es todo lo que
+ * las órdenes de una misma consulta comparten de verdad.
+ *
+ * Queda deliberadamente afuera todo lo demás. El tipo, la descripción y el
+ * documento de la orden (`orden_documento`) son de cada orden — el papel es
+ * otro. Y las etapas B, C y D no se tocan: cada orden tiene su propia
+ * solicitud, su propia autorización y su propia cita, y se tramitan por
+ * separado. Agrupar la consulta no une los seguimientos.
+ */
+function prefillDeLaConsulta(o) {
+  return {
+    medicoId: o.medicoId || '',
+    fechaOrden: o.fechaOrden || '',
+    orden_archivo: o.orden_archivo || null,
+  };
 }
 
 /** Abre el asistente de edición. `id` ausente = orden nueva (sin
@@ -898,6 +927,12 @@ async function openOrderWizard(id, prefill, forceTab) {
   let startTab = o ? TAB_BY_STAGE[o._stage] : 'a';
   if (o && isAuthTableType(o.tipoOrden) && startTab === 'd') startTab = 'c';
 
+  // Orden nueva encadenada a una consulta ya registrada (ver prefillDeLaConsulta).
+  // Su aviso en la pestaña A va como un único nodo de texto, sin elementos en
+  // línea (un <em>, por ejemplo): .info-box es flex y cada hijo se convertiría
+  // en una columna aparte.
+  const esDeConsulta = !id && !!(prefill?.fechaOrden || prefill?.orden_archivo);
+
   const docOptionsCita = doctors.map(d => `<option value="${d.id}" ${o?.medicoId_cita === d.id ? 'selected' : ''}>${esc(d.nombre)}${d.especialidad ? ' — ' + esc(d.especialidad) : ''}</option>`).join('');
   const centerOptions = centers.map(c => `<option value="${c.id}" ${o?.auth_centroId === c.id ? 'selected' : ''}>${esc(c.nombre)}</option>`).join('');
 
@@ -909,6 +944,7 @@ async function openOrderWizard(id, prefill, forceTab) {
       <button class="wiz-tab ${startTab === 'd' ? 'active' : ''} ${isAuthTableType(o?.tipoOrden || prefill?.tipoOrden) ? 'hidden' : ''}" id="wiz-tab-d" data-t="d" type="button"><span class="wiz-dot"></span>D · Cita</button>
     </div>
     <div class="wiz-pane ${startTab === 'a' ? 'visible' : ''}" id="pane-a">
+      ${!o && esDeConsulta ? `<div class="info-box" style="margin-bottom:16px">Otra orden de la misma consulta: ya vienen el médico, la fecha y la historia clínica. Falta el tipo, la descripción y el documento de esta orden.</div>` : ''}
       ${!o || o._stage === 'A' ? `<div class="info-box" style="margin-bottom:16px">Una vez que esta orden avance a la etapa "Solicitud", ya no podrá eliminarse — solo editarse. Revisa bien los datos antes de continuar.</div>` : ''}
       <div class="form-row cols-2">
         ${liveSearchFieldHtml('of-medico', {
@@ -970,10 +1006,14 @@ async function openOrderWizard(id, prefill, forceTab) {
     </div>
   `;
 
-  showModal(id ? 'Editar orden médica' : 'Nueva orden médica', body, [
-    { label: 'Cancelar', cls: 'btn', action: closeModal },
-    { label: id ? 'Guardar cambios' : 'Crear orden', cls: 'btn btn-primary', action: () => saveOrderForm(id) },
-  ]);
+  // "Guardar y agregar otra" solo al crear: encadena otra orden de la misma
+  // consulta sin pasar por la lista ni volver a poner médico, fecha e
+  // historia clínica. Editando una orden ya existente no tendría sentido.
+  const botones = [{ label: 'Cancelar', cls: 'btn', action: closeModal }];
+  if (!id) botones.push({ label: 'Guardar y agregar otra', cls: 'btn', action: () => saveOrderForm(id, { agregarOtra: true }) });
+  botones.push({ label: id ? 'Guardar cambios' : 'Crear orden', cls: 'btn btn-primary', action: () => saveOrderForm(id) });
+
+  showModal(id ? 'Editar orden médica' : 'Nueva orden médica', body, botones);
   setModalMaxWidth('680px');
 
   document.querySelectorAll('.wiz-tab').forEach(t => t.addEventListener('click', () => switchWizTab(t.dataset.t)));
@@ -1027,7 +1067,7 @@ async function openOrderWizard(id, prefill, forceTab) {
       label: etiquetaMedico(doctors.find(d => d.id === o.medicoId)),
     });
   } else {
-    document.getElementById('of-fecha').value = today();
+    document.getElementById('of-fecha').value = prefill?.fechaOrden || today();
     if (prefill?.medicoId) {
       fillLiveSearch('of-medico', {
         id: prefill.medicoId,
@@ -1035,8 +1075,18 @@ async function openOrderWizard(id, prefill, forceTab) {
       });
     }
     if (prefill?.tipoOrden) document.getElementById('of-tipo').value = prefill.tipoOrden;
+    // Historia clínica heredada de otra orden de la misma consulta. Llega
+    // como adjunto YA en Storage (sin `data`), apuntando a la carpeta de la
+    // orden de origen; al guardar se copia a la carpeta de esta — ver
+    // needsUpload y files.copyAttachment. Se puede quitar con la ✕ de la
+    // vista previa si esta orden no la lleva.
+    if (prefill?.orden_archivo) orderFiles.orden = prefill.orden_archivo;
   }
-  renderFilePreview('orden'); renderFilePreview('solicitud');
+  // 'documento' se quedó fuera de esta línea cuando se agregó el campo Orden
+  // (tanda 9, migración 0033): el adjunto sí se cargaba en orderFiles, pero al
+  // reabrir la orden no se dibujaba, así que parecía que no había ninguno. No
+  // se perdía —se guardaba de vuelta igual—, pero invitaba a subirlo dos veces.
+  renderFilePreview('orden'); renderFilePreview('documento'); renderFilePreview('solicitud');
   // Los `value =` de arriba no disparan 'input', así que el aviso de la
   // etapa B se evalúa a mano una vez cargados los datos.
   refrescarAvisoSolicitud();
@@ -1227,19 +1277,41 @@ function switchWizTab(t) {
 const FILE_SLOTS = { orden: 'orden_archivo', documento: 'orden_documento', solicitud: 'solicitud_imagen', autorizacion: 'auth_imagen' };
 
 /**
- * Sube a Storage los adjuntos recién elegidos (los que aún tienen `data`
- * en memoria) y deja en `obj` el formato persistible {name,type,size,path}.
+ * ¿Este adjunto hay que llevarlo a Storage al guardar la orden `orderId`?
+ * Dos casos distintos:
+ *
+ * - Se eligió en el navegador y todavía es un data-URL en memoria → subir.
+ * - Se heredó de otra orden con "Agregar otra orden de esta consulta": ya
+ *   está en Storage, pero bajo la carpeta de la orden de ORIGEN → copiar.
+ *   Dejarlo apuntando ahí sería compartir el objeto entre dos órdenes, y
+ *   eso rompe al borrar (ver files.copyAttachment).
+ *
+ * Con `orderId` sin definir (la orden todavía no existe) cualquier adjunto
+ * cuenta como pendiente: es lo que decide si hace falta el guardado en dos
+ * pasos, que es de donde sale el id para la ruta.
+ */
+function needsUpload(att, orderId) {
+  if (!att) return false;
+  if (!files.isStored(att)) return !!att.data;
+  return !files.belongsToOrder(att, state.household.id, orderId);
+}
+
+/**
+ * Lleva a Storage los adjuntos pendientes (ver needsUpload: los recién
+ * elegidos se suben; los heredados de otra orden se copian) y deja en `obj`
+ * el formato persistible {name,type,size,path}.
  */
 async function uploadNewAttachments(obj, orderId) {
   for (const [slot, field] of Object.entries(FILE_SLOTS)) {
     const f = orderFiles[slot];
-    if (f && f.data && !files.isStored(f)) {
-      obj[field] = await files.uploadAttachment(state.household.id, orderId, slot, f);
-    }
+    if (!needsUpload(f, orderId)) continue;
+    obj[field] = files.isStored(f)
+      ? await files.copyAttachment(f, state.household.id, orderId, slot)
+      : await files.uploadAttachment(state.household.id, orderId, slot, f);
   }
 }
 
-async function saveOrderForm(editId) {
+async function saveOrderForm(editId, { agregarOtra = false } = {}) {
   if (!state.activePatient) { showToast('Selecciona un paciente primero', 'err'); return; }
 
   const tipoOrden = document.getElementById('of-tipo').value;
@@ -1315,9 +1387,13 @@ async function saveOrderForm(editId) {
     } else {
       // Orden nueva: se necesita su id para la ruta en Storage. Se crea
       // primero (con los adjuntos aún fuera), se suben, y se actualiza.
-      const hasNewFiles = Object.values(orderFiles).some(f => f && f.data && !files.isStored(f));
+      const hasNewFiles = Object.values(orderFiles).some(f => needsUpload(f, undefined));
       if (hasNewFiles) {
-        const draft = { ...obj, orden_archivo: null, solicitud_imagen: null, auth_imagen: null };
+        // El borrador va sin NINGÚN adjunto: los slots se vacían desde
+        // FILE_SLOTS y no a mano, que era como se había quedado afuera
+        // orden_documento cuando se agregó en la migración 0033.
+        const draft = { ...obj };
+        for (const field of Object.values(FILE_SLOTS)) draft[field] = null;
         saved = await api.saveOrder(draft, state.household.id, state.activePatient.id);
         obj.id = saved.id;
         await uploadNewAttachments(obj, saved.id);
@@ -1356,7 +1432,13 @@ async function saveOrderForm(editId) {
       const { render: renderDashboard } = await import('./dashboard.js');
       renderDashboard();
     }
-    if (wantsFollowUp) {
+    // "Guardar y agregar otra": el usuario pidió explícitamente encadenar
+    // otra orden de la misma consulta, así que gana sobre los dos ofrecimientos
+    // de abajo — está transcribiendo una pila de papeles, no es momento de
+    // interrumpirlo con un confirm().
+    if (agregarOtra) {
+      openOrderWizard(undefined, prefillDeLaConsulta(saved));
+    } else if (wantsFollowUp) {
       openOrderWizard(undefined, { medicoId: obj.medicoId, tipoOrden: 'Cita de control' });
     } else if (nuevaEntrega) {
       // Se marcó una nueva entrega en una orden de Medicamentos/Insumos/

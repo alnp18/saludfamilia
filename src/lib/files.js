@@ -68,6 +68,36 @@ export async function uploadAttachment(householdId, orderId, slot, att) {
   return { name: att.name, type: att.type || blob.type, size: blob.size, path };
 }
 
+/**
+ * ¿Este adjunto vive en la carpeta de Storage de ESTA orden? Cada objeto se
+ * guarda en `<household_id>/<order_id>/…` (ver uploadAttachment), así que la
+ * ruta alcanza para saber de qué orden es. Lo usa el asistente de órdenes
+ * para reconocer un adjunto heredado de otra orden — ver copyAttachment.
+ */
+export function belongsToOrder(att, householdId, orderId) {
+  return isStored(att) && !!orderId && att.path.startsWith(`${householdId}/${orderId}/`);
+}
+
+/**
+ * Copia un objeto ya guardado en Storage a la carpeta de otra orden y
+ * devuelve el adjunto persistible que apunta a la COPIA.
+ *
+ * Lo usa "Agregar otra orden de esta consulta": la historia clínica es la
+ * misma hoja, pero las dos órdenes NO pueden compartir la ruta.
+ * removeAttachments borra por ruta y no lleva cuenta de referencias — quitar
+ * el adjunto de una de las órdenes, o borrar la orden entera, dejaría a la
+ * otra apuntando a un objeto que ya no existe. Duplicar unos kilobytes sale
+ * más barato que perder una historia clínica.
+ *
+ * La copia la hace el servidor: el archivo no baja al navegador.
+ */
+export async function copyAttachment(att, householdId, orderId, slot) {
+  const destino = `${householdId}/${orderId}/${slot}-${Date.now()}-${sanitizeName(att.name)}`;
+  const { error } = await supabase.storage.from(BUCKET).copy(att.path, destino);
+  if (error) throw error;
+  return { name: att.name, type: att.type, size: att.size, path: destino };
+}
+
 /** URL firmada temporal para ver/descargar un adjunto del bucket privado. */
 export async function getSignedUrl(path, expiresInSeconds = 3600) {
   const { data, error } = await supabase.storage.from(BUCKET)
